@@ -1,0 +1,271 @@
+// AI Component Ecosystem Portal — database schema.
+// Source of truth for this file: docs/02-data-model.md
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma 7 removed `url` from this block. The migrate/introspect connection
+// lives in prisma.config.ts, and the runtime client is constructed with a
+// driver adapter (see src/server/db.ts).
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────── enums ───────────────────────────
+
+enum Role {
+  USER // browse and download
+  PUBLISHER // + publish, version, edit own components (granted on first publish)
+  ADMIN // + suspend any component, read the audit log
+}
+
+// SCREAMING_SNAKE here and in TypeScript; kebab-case in URLs and in the
+// manifest (`mcp-gateway`). Convert at the edge — never leak either form
+// across the boundary (.claude/rules/00-project-context.md).
+enum ComponentType {
+  SKILL
+  PLUGIN
+  AGENT
+  MCP_GATEWAY
+}
+
+enum ComponentStatus {
+  PUBLISHED
+  DEPRECATED // visible, flagged, still downloadable
+  SUSPENDED // hidden by an admin; not downloadable
+}
+
+enum DownloadKind {
+  COMPONENT
+  TEMPLATE
+}
+
+// ─────────────────── Auth.js required models ───────────────────
+// Field names and types are dictated by @auth/prisma-adapter.
+// Do NOT rename or re-case anything below — the adapter maps by exact name.
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+
+  // Portal-owned columns. Safe to change.
+  githubLogin String? @unique
+  role        Role    @default(USER)
+
+  accounts   Account[]
+  sessions   Session[]
+  components Component[]
+  versions   ComponentVersion[] @relation("PublishedBy")
+  downloads  Download[]
+  auditLogs  AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// Present because the adapter requires it. Sessions are JWT-based (ADR-004), so
+// this table stays empty in normal operation — it exists so a future switch to
+// database sessions is a config change, not a migration.
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────── catalog models ───────────────────────
+
+model Component {
+  id          String          @id @default(cuid())
+  slug        String          @unique // "pdf-extractor" — the URL identifier
+  name        String // manifest `name`
+  displayName String
+  type        ComponentType
+  summary     String          @db.VarChar(300)
+  readme      String?         @db.Text // markdown from README.md in the archive
+  status      ComponentStatus @default(PUBLISHED)
+  license     String          @default("MIT")
+  homepage    String?
+  repository  String?
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Denormalized pointer, written in the SAME transaction as the version insert
+  // so it cannot drift. Without it, every catalog row needs an aggregate
+  // subquery to find its current version (docs/02 section 2.1).
+  latestVersionId String?           @unique
+  latestVersion   ComponentVersion? @relation("LatestVersion", fields: [latestVersionId], references: [id])
+
+  downloadCount Int @default(0)
+
+  // GENERATED ALWAYS ... STORED, added in a hand-written migration because
+  // Prisma cannot express generated columns. Postgres maintains it, so it
+  // cannot go stale (ADR-008). NEVER write to this column.
+  searchVector Unsupported("tsvector")?
+
+  versions  ComponentVersion[] @relation("ComponentVersions")
+  tags      ComponentTag[]
+  downloads Download[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft delete — keeps download history and audit intact
+
+  @@index([type, status, deletedAt])
+  @@index([ownerId])
+  @@index([downloadCount(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}
+
+model ComponentVersion {
+  id      String @id @default(cuid())
+  version String // "1.0.0" — strict semver, validated by Zod
+
+  componentId String
+  component   Component @relation("ComponentVersions", fields: [componentId], references: [id], onDelete: Cascade)
+
+  manifest       Json // the validated component.json
+  objectKey      String  @unique // components/{slug}/{version}/{slug}-{version}.zip
+  sizeBytes      Int
+  checksumSha256 String  @unique // integrity + duplicate-archive detection
+  changelog      String? @db.Text
+
+  publishedById String
+  publishedBy   User   @relation("PublishedBy", fields: [publishedById], references: [id])
+
+  // NO updatedAt. These rows are insert-only — that immutability is what makes
+  // the checksum a guarantee rather than a suggestion (ADR-007).
+  createdAt DateTime @default(now())
+
+  latestFor Component? @relation("LatestVersion")
+  downloads Download[]
+
+  @@unique([componentId, version])
+  @@index([componentId, createdAt(sort: Desc)])
+}
+
+model Tag {
+  id    String @id @default(cuid())
+  slug  String @unique // "pdf"
+  label String // "PDF"
+
+  components ComponentTag[]
+  createdAt  DateTime       @default(now())
+}
+
+model ComponentTag {
+  componentId String
+  tagId       String
+
+  component Component @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  tag       Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([componentId, tagId])
+  @@index([tagId])
+}
+
+model Template {
+  id          String        @id @default(cuid())
+  type        ComponentType @unique // exactly one template per component type
+  name        String
+  description String        @db.Text
+  version     String // template version, independent of components built from it
+
+  objectKey      String
+  sizeBytes      Int
+  checksumSha256 String
+  docsUrl        String?
+
+  downloadCount Int @default(0)
+
+  downloads Download[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model Download {
+  id   String       @id @default(cuid())
+  kind DownloadKind
+
+  componentId String?
+  component   Component?        @relation(fields: [componentId], references: [id], onDelete: SetNull)
+  versionId   String?
+  version     ComponentVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  templateId  String?
+  template    Template?         @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // sha256(ip + DOWNLOAD_IP_SALT). A raw address never reaches this table —
+  // abuse detection without holding personal data (docs/02 section 2.4).
+  ipHash    String?  @db.VarChar(64)
+  userAgent String?  @db.VarChar(512)
+  createdAt DateTime @default(now())
+
+  @@index([componentId, createdAt(sort: Desc)])
+  @@index([templateId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+// ─────────────────────────── audit ───────────────────────────
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  actorId String?
+  // SetNull, not Cascade: deleting an abusive account must not erase the
+  // evidence of what it did.
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  action     String  @db.VarChar(64) // closed vocabulary — docs/02 section 5
+  targetType String  @db.VarChar(32) // "User" | "Component" | "Template"
+  targetId   String?
+  metadata   Json?
+
+  ipHash    String?  @db.VarChar(64)
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([targetType, targetId])
+  @@index([action, createdAt(sort: Desc)])
+}

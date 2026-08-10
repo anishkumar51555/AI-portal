@@ -1,0 +1,165 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  AI COMPONENT ECOSYSTEM PORTAL — DEPENDENCY MANIFEST
+#  Generated 2026-08-09 · verified installed, not aspirational
+# ═══════════════════════════════════════════════════════════════════════════
+#
+#  NOTE ON THIS FILE
+#  requirements.txt is a Python convention. This is a Node.js project, so the
+#  file npm actually installs from is package.json, and the exact resolved
+#  tree is locked in package-lock.json. Both are committed and are the source
+#  of truth.
+#
+#  This file is the human-readable companion: every dependency, its pinned
+#  version, and WHY it is here. Reviewers read this; npm reads package.json.
+#  If you change one, change the other.
+#
+#  INSTALL:            npm ci          (exact, reproducible — use in CI)
+#                      npm install     (respects semver ranges — use locally)
+#  VERIFY:             npm run gate
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# SYSTEM PREREQUISITES  (not installed by npm)
+# ───────────────────────────────────────────────────────────────────────────
+node                        >=22.0.0    # verified locally: v24.14.1
+npm                         >=10.0.0    # verified locally: 11.11.0
+docker-desktop              latest      # NOT YET INSTALLED — required for
+                                        #   Postgres + MinIO and every
+                                        #   integration test. Needs WSL2.
+git                         >=2.40      # verified locally: 2.53.0
+
+# Optional, on demand:
+#   npx playwright install chromium     # ~150 MB, only before the first E2E run
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# RUNTIME DEPENDENCIES
+# ───────────────────────────────────────────────────────────────────────────
+
+# ── Framework & UI runtime ──
+next                        ^16.3.0     # App Router; one deployable for UI + API
+react                       ^19.2.8     # Server Components are the default
+react-dom                   ^19.2.8
+
+# ── Database ──
+@prisma/client              ^7.9.1      # generated, type-safe query client
+                                        #   NOTE: `prisma` (the CLI) is a devDep;
+                                        #   only the client ships to production
+
+# ── Authentication ──
+next-auth                   5.0.0-beta.32   # EXACT PIN, no caret. Still tagged
+                                        #   beta after ~2 years but is the de-facto
+                                        #   App Router standard. A beta patch can
+                                        #   break; pinning is deliberate. ADR-004.
+@auth/prisma-adapter        2.11.3      # persists User/Account/Session
+
+# ── Validation ──
+zod                         ^4.4.3      # ONE schema gives runtime validation,
+                                        #   the TS type, and the published JSON
+                                        #   Schema. Core of the manifest spec.
+                                        #   ⚠ v4 API — v3 examples will mislead.
+
+# ── Object storage (S3-compatible) ──
+@aws-sdk/client-s3          ^3.1106.0   # vendor-neutral: MinIO, R2, S3, Azure Blob
+@aws-sdk/s3-request-presigner ^3.1106.0 # presigned PUT/GET so bytes bypass the app
+
+# ── Archive inspection ──
+yauzl                       ^3.4.0      # STREAMING zip reader. Chosen over adm-zip
+                                        #   specifically because it can enforce
+                                        #   limits BEFORE decompressing — the whole
+                                        #   basis of the zip-bomb defence.
+
+# ── Rendering user content ──
+react-markdown              ^10.1.0     # renders publisher READMEs
+rehype-sanitize             ^6.0.0      # strips XSS. Non-negotiable: the portal
+                                        #   renders markdown written by strangers.
+remark-gfm                  ^4.0.1      # tables, task lists, strikethrough
+
+# ── Styling / component primitives ──
+tailwind-merge              ^3.6.0      # resolves conflicting Tailwind classes
+clsx                        ^2.1.1      # conditional class composition
+class-variance-authority    ^0.7.1      # required by shadcn/ui variants
+lucide-react                ^1.30.0     # icon set shadcn/ui expects
+
+# ── Operations ──
+pino                        ^10.3.1     # structured JSON logs with requestId
+                                        #   correlation. String logs are unsearchable.
+ulid                        ^3.0.2      # sortable, non-guessable ids for staging
+                                        #   object keys and request ids
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# DEVELOPMENT DEPENDENCIES
+# ───────────────────────────────────────────────────────────────────────────
+
+# ── Language & types ──
+typescript                  ~6.0.3      # ⚠ NOT 7.x. typescript-eslint requires
+                                        #   TS <6.1.0. Upgrading TS alone breaks
+                                        #   linting. See ADR-011.
+@types/node                 ^26.2.0
+@types/react                ^19.2.18
+@types/react-dom            ^19.2.4
+@types/yauzl                ^3.4.0
+@types/archiver             ^8.0.0
+
+# ── Database tooling ──
+prisma                      ^7.9.1      # migrations, generate, studio
+
+# ── Styling toolchain ──
+tailwindcss                 ^4.3.3      # v4: config lives in CSS, not a JS file
+@tailwindcss/postcss        ^4.3.3      # the PostCSS plugin v4 requires
+
+# ── Linting & formatting ──
+eslint                      ~9.39.5     # ⚠ NOT 10.x. eslint-plugin-import and
+                                        #   eslint-plugin-jsx-a11y both cap at 9.
+                                        #   See ADR-011.
+@eslint/js                  ~9.39.5     # must track eslint's major
+typescript-eslint           ^8.66.0     # TS-aware rules; the TS <6.1.0 constraint
+eslint-config-next          ^16.3.0     # Next rules + registers jsx-a11y
+eslint-plugin-import        ^2.32.0     # import ordering
+eslint-plugin-jsx-a11y      ^6.10.2     # accessibility rules
+prettier                    ^3.9.6      # formatting; run by a PostToolUse hook
+prettier-plugin-tailwindcss ^0.8.1      # sorts Tailwind classes deterministically
+
+# ── Testing ──
+vitest                      ^4.1.10     # unit + integration; native ESM/TS
+@vitest/coverage-v8         ^4.1.10     # coverage with per-path thresholds
+@playwright/test            ^1.62.1     # two E2E journeys only (docs/11 §4)
+
+# ── Scripts & fixtures ──
+tsx                         ^4.23.11    # run .ts/.mts directly (seed, scripts)
+archiver                    ^8.0.0      # builds template zips and test fixtures
+                                        #   ⚠ v8 is ESM-only: `import { ZipArchive }`,
+                                        #   no default export. It also sanitizes
+                                        #   entry names, so the path-traversal test
+                                        #   fixtures are byte-forged by hand in
+                                        #   scripts/build-fixtures.mts.
+dotenv-cli                  ^11.0.0     # load .env for one-off script runs
+pino-pretty                 ^13.1.3     # readable logs in development only
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# DELIBERATELY NOT INSTALLED
+# Recording rejections is as useful as recording choices.
+# ───────────────────────────────────────────────────────────────────────────
+# adm-zip                — buffers the entire archive; cannot enforce limits
+#                          before decompressing. Wrong tool for untrusted input.
+# express / mongoose     — the spec requires a relational, type-safe stack (ADR-003)
+# elasticsearch / algolia— Postgres tsvector + GIN handles this scale (ADR-008)
+# redis / ioredis        — rate limiting uses a Postgres counter table for now
+# trpc                   — a bespoke RPC protocol closes off REST + OpenAPI + a CLI
+# clerk / auth0          — paid dependency, and teaches nothing about OAuth (ADR-004)
+# zustand / redux        — catalog state lives in the URL; no client store needed
+# axios                  — native fetch is sufficient and ships with the runtime
+# moment / dayjs         — Intl and native Date cover every need here
+# lodash                 — modern JS covers it; a whole utility library is not warranted
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# INSTALL FOOTPRINT (measured 2026-08-09)
+# ───────────────────────────────────────────────────────────────────────────
+# packages installed        756
+# install time              ~2 min (cold cache)
+# toolchain gate            typecheck ✓  lint ✓  build ✓  unit 14/14 ✓

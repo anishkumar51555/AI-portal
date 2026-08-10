@@ -1,0 +1,257 @@
+# 11 — Testing Strategy
+
+## 1. Philosophy
+
+With 17 days you cannot test everything, so test **where a bug would be most expensive**
+and skip the rest deliberately rather than accidentally.
+
+```
+        ╱ E2E ╲            2 journeys      Playwright     slow, brittle, high confidence
+      ╱─────────╲
+    ╱ Integration ╲       ~15 tests       Vitest + real Postgres + real MinIO
+  ╱─────────────────╲
+╱      Unit          ╲    ~60 tests       Vitest, pure functions, milliseconds
+──────────────────────
+```
+
+**Coverage targets — deliberately uneven, because uniform coverage targets are a smell:**
+
+| Area                                    | Target           | Rationale                                                |
+| --------------------------------------- | ---------------- | -------------------------------------------------------- |
+| `domain/schemas/` (manifest validation) | **95%**          | The specification. A bug here corrupts the catalog.      |
+| `server/services/archive.inspector`     | **95%**          | Security boundary. Every guard needs a test.             |
+| `server/services/*`                     | 80%              | Business logic                                           |
+| `server/repositories/`                  | 60%              | Mostly Prisma passthrough; covered by integration tests  |
+| `app/api/`                              | integration only | Thin handlers — testing them in isolation tests mocks    |
+| `components/`                           | ~0%              | Manual + E2E. UI unit tests rot fastest and catch least. |
+| **Overall gate in CI**                  | **70%**          | Meaningful but not performative                          |
+
+> Being able to say _"I chose 95% on the validator and 0% on the UI, and here's why"_ is a
+> better answer than "I have 85% coverage."
+
+## 2. Unit tests
+
+`tests/unit/**` · Vitest · no network, no database, no filesystem beyond fixtures.
+
+### 2.1 Manifest validator — the highest-value suite
+
+```ts
+// tests/unit/manifest.test.ts
+import { manifestSchema } from "@/domain/schemas/manifest";
+import { toFieldErrors } from "@/domain/schemas/errors";
+
+describe("manifest v1.0", () => {
+  describe.each(["skill", "plugin", "agent", "mcp-gateway"] as const)("%s", (type) => {
+    it("accepts the canonical valid fixture", () => {
+      expect(manifestSchema.safeParse(valid(type)).success).toBe(true);
+    });
+    it("rejects a missing required field", () => {
+      const { description, ...rest } = valid(type);
+      const r = manifestSchema.safeParse(rest);
+      expect(r.success).toBe(false);
+      expect(toFieldErrors(r.error!)).toContainEqual(
+        expect.objectContaining({ path: "description" }),
+      );
+    });
+    it("rejects unknown keys (strict mode)", () => {
+      expect(manifestSchema.safeParse({ ...valid(type), rogue: 1 }).success).toBe(false);
+    });
+  });
+
+  it.each([
+    ["1.0", "not three parts"],
+    ["v1.0.0", "leading v"],
+    ["^1.0.0", "a range, not a version"],
+    ["1.0.0.0", "four parts"],
+  ])("rejects version %s (%s)", (version) => {
+    expect(manifestSchema.safeParse({ ...valid("skill"), version }).success).toBe(false);
+  });
+
+  it("rejects an http:// homepage", () => {
+    /* https only */
+  });
+  it("rejects javascript: URLs", () => {
+    /* XSS vector */
+  });
+  it("rejects an mcp-gateway with stdio transport and no command", () => {
+    /* refine */
+  });
+  it("rejects duplicate mcp tool names", () => {
+    /* refine */
+  });
+  it("rejects a plugin with neither hooks nor commands", () => {
+    /* refine */
+  });
+  it("rejects a manifest containing a GitHub token pattern", () => {
+    /* §7 of doc 06 */
+  });
+  it("reports paths in dotted/bracket form", () => {
+    // tools[0].name — not "tools,0,name"
+  });
+});
+```
+
+### 2.2 Archive inspector — the security suite
+
+Six hand-built fixtures under `tests/fixtures/archives/`, committed to the repo. Build
+them once with a script; they are the most convincing artifacts in the project.
+
+| Fixture                | Contains                  | Expected                                 |
+| ---------------------- | ------------------------- | ---------------------------------------- |
+| `valid.zip`            | Correct skill component   | passes; checksum matches                 |
+| `zip-slip.zip`         | Entry `../../evil.txt`    | `ARCHIVE_UNSAFE` / `PATH_TRAVERSAL`      |
+| `absolute-path.zip`    | Entry `/etc/passwd`       | `ARCHIVE_UNSAFE` / `ABSOLUTE_PATH`       |
+| `bomb.zip`             | 1 MB → 500 MB             | `ARCHIVE_UNSAFE` / `BOMB_*`              |
+| `symlink.zip`          | Symlink to `/etc/shadow`  | `ARCHIVE_UNSAFE` / `SYMLINK`             |
+| `too-many-entries.zip` | 5000 empty files          | `ARCHIVE_UNSAFE` / `TOO_MANY_ENTRIES`    |
+| `no-manifest.zip`      | README only               | `MANIFEST_MISSING`                       |
+| `nested-manifest.zip`  | `my-skill/component.json` | `MANIFEST_MISSING` + the actionable hint |
+
+```ts
+it("aborts a zip bomb without reading it fully", async () => {
+  const spy = vi.fn();
+  await expect(
+    inspectArchive(open("bomb.zip"), limits, { onEntry: spy }),
+  ).rejects.toMatchObject({ code: "ARCHIVE_UNSAFE" });
+  expect(spy.mock.calls.length).toBeLessThan(50); // proves it stopped early
+});
+```
+
+That assertion is the good one: it tests the _property_ (early abort), not just the
+outcome. Anyone can reject a bomb after decompressing it — rejecting it without
+decompressing is the actual defence.
+
+### 2.3 Also unit-tested
+
+- `guards.ts` — `requireAuth` / `requireRole` / `requireOwnership`, including the
+  deliberate 404-instead-of-403 on a non-owned resource.
+- Semver comparison — `1.10.0 > 1.9.0` (string comparison gets this wrong; test it).
+- Slug generation and collision handling.
+- `toFieldErrors` path formatting.
+- `env.ts` — throws on a missing or malformed variable.
+
+## 3. Integration tests
+
+`tests/integration/**` · Vitest with a real Postgres and a real MinIO (Docker locally,
+service containers in CI). **No mocking of Prisma or S3.** A mocked database tests your
+mock.
+
+Isolation: each test runs in a transaction that is rolled back, or against a
+`TRUNCATE ... CASCADE`d schema in `beforeEach`. Never share state between tests.
+
+| #   | Test                                      | Asserts                                                                                                                         |
+| --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Publish a valid archive end-to-end        | 201; `Component` + `ComponentVersion` rows; `latestVersionId` set; tags upserted; object at the permanent key; staging key gone |
+| 2   | Publish an invalid manifest               | 422 + `details[]`; **no** DB rows; staging object **deleted**                                                                   |
+| 3   | Crash after `CopyObject` (injected fault) | No `Component` row; the orphaned object exists — proving the fail-safe ordering                                                 |
+| 4   | Publish a duplicate slug                  | 409 `SLUG_TAKEN`; original untouched                                                                                            |
+| 5   | Publish a duplicate checksum              | 409 `DUPLICATE_ARCHIVE`                                                                                                         |
+| 6   | Publish v1.1.0 over v1.0.0                | Both versions exist; `latestVersionId` moved; both archives downloadable                                                        |
+| 7   | Publish v0.9.0 over v1.0.0                | 409 `VERSION_NOT_INCREASING`                                                                                                    |
+| 8   | Publish with another user's `stagingKey`  | 403 `STAGING_FORBIDDEN`; the victim's object untouched                                                                          |
+| 9   | Catalog search                            | FTS ranks a title match above a body match; facet counts equal row counts                                                       |
+| 10  | Suspended component                       | 404 for a normal user; visible to an `ADMIN`                                                                                    |
+| 11  | Download increments counters              | `Download` row inserted; `downloadCount` +1; IP is hashed, not raw                                                              |
+| 12  | Rate limit                                | 11th presign in the window → 429 with `Retry-After`                                                                             |
+| 13  | Soft delete                               | Absent from the catalog; version rows retained                                                                                  |
+| 14  | Template download                         | 302 to a presigned URL that actually resolves to the right bytes                                                                |
+| 15  | Seed idempotency                          | Running `db:seed` twice produces identical row counts                                                                           |
+
+Tests 3 and 8 are the ones to point at in an interview. Test 3 proves you thought about
+partial failure; test 8 proves you thought about multi-tenancy in object storage.
+
+## 4. End-to-end tests
+
+`tests/e2e/**` · Playwright · exactly **two** journeys. E2E is the most expensive
+maintenance per test; two well-chosen ones beat twenty flaky ones.
+
+```ts
+test("consumer: sign in and download a template", async ({ page }) => {
+  await loginAsSeededUser(page); // storageState, not real GitHub OAuth
+  await page.goto("/templates");
+  const dl = page.waitForEvent("download");
+  await page.getByRole("button", { name: /download.*mcp gateway/i }).click();
+  expect((await dl).suggestedFilename()).toMatch(/mcp-gateway-template-.*\.zip/);
+});
+
+test("producer: publish a component and find it in the catalog", async ({ page }) => {
+  await loginAsSeededUser(page);
+  await page.goto("/publish");
+  await page.setInputFiles('input[type="file"]', "tests/fixtures/archives/valid.zip");
+  await page.getByRole("button", { name: /publish/i }).click();
+  await expect(page).toHaveURL(/\/components\/e2e-test-skill/);
+  await page.goto("/catalog?q=e2e-test-skill");
+  await expect(page.getByText("E2E Test Skill")).toBeVisible();
+});
+```
+
+**Do not automate the real GitHub OAuth flow.** It is slow, rate-limited, and requires
+credentials in CI. Seed a user, mint a session cookie, and inject it via Playwright's
+`storageState`. Testing GitHub's login page is testing GitHub.
+
+## 5. What is deliberately not tested
+
+State these; they are decisions, not gaps.
+
+| Not tested               | Why                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------- |
+| shadcn/ui primitives     | Third-party, already tested upstream                                            |
+| Auth.js internals        | Library code. Test _your_ guards, not their OAuth.                              |
+| Prisma query building    | Library code. Integration tests cover the real queries.                         |
+| Visual regression        | Needs a snapshot service; low value for a solo project                          |
+| Load / performance       | No traffic to justify it. The p95 target is measured manually with seeded data. |
+| Accessibility, automated | Covered by `eslint-plugin-jsx-a11y` + one manual keyboard pass per page         |
+
+## 6. Config
+
+```ts
+// vitest.config.ts
+export default defineConfig({
+  test: {
+    environment: "node",
+    setupFiles: ["tests/setup.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov", "html"],
+      include: ["src/domain/**", "src/server/**"],
+      exclude: ["**/*.d.ts", "src/server/db.ts", "**/index.ts"],
+      thresholds: {
+        lines: 70,
+        functions: 70,
+        branches: 65,
+        statements: 70,
+        // higher bars where a bug is most expensive
+        "src/domain/schemas/**": { lines: 95, functions: 95 },
+        "src/server/services/archive.inspector.ts": { lines: 95, functions: 95 },
+      },
+    },
+  },
+});
+```
+
+```jsonc
+// package.json — scripts
+"test":             "vitest run",
+"test:unit":        "vitest run tests/unit",
+"test:integration": "vitest run tests/integration",
+"test:e2e":         "playwright test",
+"test:watch":       "vitest"
+```
+
+## 7. Manual QA checklist — before each demo
+
+Ten minutes, and it catches the things automation misses.
+
+- [ ] Sign in and out; the header state is correct in both
+- [ ] `/publish` while logged out redirects, and returns you there after login
+- [ ] Publish the untouched Skill template → succeeds
+- [ ] Publish a broken manifest → the errors name the right fields
+- [ ] Publish `zip-slip.zip` → clean rejection, not a 500
+- [ ] Search finds it; every filter combination returns sane results
+- [ ] Detail page renders README and the manifest
+- [ ] Download opens a real, valid zip
+- [ ] Mobile viewport (375 px) — no horizontal scroll on any page
+- [ ] Tab through the catalog — focus is visible and ordered
+- [ ] Dark mode, if implemented, has no unreadable text
+- [ ] Hard refresh on a filtered catalog URL reproduces the same view
+- [ ] Browser console is clean — no errors, no React key warnings

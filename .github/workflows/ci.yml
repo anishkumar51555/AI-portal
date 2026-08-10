@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true # a new push supersedes the running build
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  # ── fast feedback: no services, so this starts instantly ──
+  static:
+    name: Lint · Typecheck · Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run fixtures:build
+      - run: npm run test:unit -- --coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+  # ── real Postgres, real MinIO. Nothing is mocked at this layer. ──
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: portal
+          POSTGRES_PASSWORD: portal
+          POSTGRES_DB: ai_portal_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U portal"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: ai-portal-test
+        ports: ["9000:9000"]
+        options: >-
+          --health-cmd "mc ready local"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://portal:portal@localhost:5432/ai_portal_test
+      DIRECT_DATABASE_URL: postgresql://portal:portal@localhost:5432/ai_portal_test
+      S3_ENDPOINT: http://localhost:9000
+      S3_BUCKET: ai-portal-test
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_FORCE_PATH_STYLE: "true"
+      AUTH_SECRET: ci-secret-that-is-at-least-32-characters-long
+      AUTH_GITHUB_ID: ci
+      AUTH_GITHUB_SECRET: ci
+      DOWNLOAD_IP_SALT: ci-salt-0123456789abcdef
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+
+      # Catches schema.prisma edited without generating a migration — the single
+      # most common way a solo developer ships a build that crashes on boot.
+      - name: Migrations match schema
+        run: |
+          npx prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "$DATABASE_URL" \
+            --exit-code
+
+      - run: npm run test:integration
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [static]
+    env:
+      # Placeholders: `next build` evaluates modules, and src/lib/env.ts refuses
+      # to load without a valid configuration. These never reach a running app.
+      DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+      AUTH_SECRET: build-time-placeholder-secret-32-chars-long
+      AUTH_GITHUB_ID: placeholder
+      AUTH_GITHUB_SECRET: placeholder
+      S3_ENDPOINT: http://localhost:9000
+      S3_BUCKET: placeholder
+      S3_ACCESS_KEY_ID: placeholder
+      S3_SECRET_ACCESS_KEY: placeholder
+      DOWNLOAD_IP_SALT: placeholder-salt-0123456789
+      NEXT_PUBLIC_APP_URL: https://example.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run build
+
+  # ── every critical feature in a completed phase must have a test ──
+  feature-gate:
+    name: Feature coverage
+    runs-on: ubuntu-latest
+    needs: [static]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # Add a --gate line per phase as it completes. Advisory until then:
+      # a gate on unbuilt phases would block every PR from day one.
+      - run: npm run test:matrix -- --gate P0
+      - name: Full matrix (informational)
+        run: npm run test:matrix
+        continue-on-error: true
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@v3

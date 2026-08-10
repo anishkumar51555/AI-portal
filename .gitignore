@@ -1,0 +1,53 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next
+/.next/
+/out/
+next-env.d.ts
+.vercel
+
+# production
+/build
+/dist
+
+# testing
+/coverage
+/playwright-report
+/test-results
+/blob-report
+/.playwright
+
+# generated test fixtures (rebuilt with `npm run fixtures:build`)
+/tests/fixtures/archives/*.zip
+
+# built template archives (rebuilt with `npm run templates:build`)
+/templates/**/dist/
+/templates/*.zip
+
+# env — .env.example is the only one that is committed
+.env
+.env.*
+!.env.example
+
+# prisma
+/prisma/*.db
+/prisma/*.db-journal
+
+# logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# os / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# typescript
+*.tsbuildinfo
