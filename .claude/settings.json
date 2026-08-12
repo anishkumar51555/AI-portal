@@ -29,7 +29,18 @@
       "Bash(npx vitest *)",
       "Bash(node \"C:/Users/anish/AppData/Local/Temp/claude/e--AI-Portal/0b78940d-e39c-4599-824c-4d02800344ed/scratchpad/patch-state-2.mjs\")",
       "Bash(npx prettier *)",
-      "Bash(sed -n '/## Next up/,/## Decisions/p' PROJECT-STATE.md)"
+      "Bash(sed -n '/## Next up/,/## Decisions/p' PROJECT-STATE.md)",
+      "Bash(mv templates/skill/SKILL.md templates/skill/SKILL.md.bak)",
+      "Bash(npm run *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(npx tsx *)",
+      "Bash(echo \"broken exit=$?\")",
+      "Bash(mv templates/skill/SKILL.md.bak templates/skill/SKILL.md)",
+      "Bash(echo \"restored exit=$?\")",
+      "Bash(sed -n '/^model Template/,/^}/p' prisma/schema.prisma)",
+      "Bash(sed -n '/^model Tag/,/^}/p' prisma/schema.prisma)",
+      "Bash(python -)",
+      "Bash(docker compose *)"
     ],
     "deny": [
       "Read(//e/AI Portal/.env)",

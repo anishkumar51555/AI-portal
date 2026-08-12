@@ -77,9 +77,9 @@ export const validAgent: AgentManifest = {
     systemPrompt: "prompts/system.md",
     model: {
       provider: "anthropic",
-      preferred: "claude-sonnet-5",
-      fallback: ["claude-haiku-4-5-20251001"],
-      temperature: 0.2,
+      preferred: "claude-opus-5",
+      fallback: ["claude-haiku-4-5"],
+      effort: "high",
       maxTokens: 8192,
     },
     tools: [{ name: "web_search", source: "builtin" }],

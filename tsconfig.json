@@ -41,5 +41,11 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules", ".next", "out", "coverage", "playwright-report"]
+  // `templates` is excluded because each template is a standalone project with
+  // its own tsconfig and its own (deliberately uninstalled) dependencies.
+  // Type-checking them from here would fail on imports the portal has no reason
+  // to install. They are validated by `npm run templates:verify` instead, which
+  // checks the thing that actually matters: that each satisfies the real
+  // manifest schema and ships every file its manifest declares.
+  "exclude": ["node_modules", ".next", "out", "coverage", "playwright-report", "templates"]
 }

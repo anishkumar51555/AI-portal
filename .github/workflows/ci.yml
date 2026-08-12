@@ -30,6 +30,10 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run fixtures:build
+      # Fails the build if any starter template stops satisfying the manifest
+      # spec it is supposed to teach. Pure filesystem work — needs no services,
+      # so it runs here rather than in the integration job.
+      - run: npm run templates:verify
       - run: npm run test:unit -- --coverage
       - uses: actions/upload-artifact@v4
         if: always()

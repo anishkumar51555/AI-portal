@@ -216,6 +216,43 @@ describe("[F2.7] type-specific refinements", () => {
     expect(paths(m)).toContain("agent.maxIterations");
   });
 
+  it("agent: rejects temperature on an ANTHROPIC model — the API 400s on it", () => {
+    // Current Claude models reject  outright. A manifest that
+    // carries one would produce an agent that fails on its very first call, so
+    // the spec refuses it at publish time instead.
+    const m = clone(validAgent);
+    m.agent.model.provider = "anthropic";
+    m.agent.model.temperature = 0.7;
+
+    const errors = errorsFor(m);
+    const temp = errors.find((e) => e.path === "agent.model.temperature");
+    expect(temp).toBeDefined();
+    expect(temp!.message).toMatch(/effort/i);
+  });
+
+  it("agent: ALLOWS temperature on non-Anthropic providers", () => {
+    // The manifest is provider-agnostic; OpenAI, Google, and local runtimes
+    // still accept temperature, so the rule is scoped, not global.
+    const m = clone(validAgent);
+    m.agent.model.provider = "openai";
+    m.agent.model.preferred = "gpt-5";
+    m.agent.model.temperature = 0.7;
+    expect(manifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("agent: accepts an effort level, the Anthropic-native tuning knob", () => {
+    const m = clone(validAgent);
+    m.agent.model.effort = "xhigh";
+    expect(manifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("agent: rejects an unknown effort level", () => {
+    const m = clone(validAgent);
+    // @ts-expect-error — proving the enum is closed
+    m.agent.model.effort = "extreme";
+    expect(paths(m)).toContain("agent.model.effort");
+  });
+
   it("agent: rejects a temperature outside 0-2", () => {
     const m = clone(validAgent);
     m.agent.model.temperature = 5;

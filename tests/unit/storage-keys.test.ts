@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   assertOwnStagingKey,
   componentKey,
@@ -40,9 +40,26 @@ describe("[F3.11] keys are derived by the server, never supplied", () => {
   it("produces time-ordered staging keys (ULID, not UUID)", () => {
     // Lexicographic order matches creation order, which makes a bucket listing
     // chronological and the 24h lifecycle sweep easy to reason about.
-    const first = stagingKey("usr_a");
-    const second = stagingKey("usr_a");
-    expect([first, second].sort()).toEqual([first, second]);
+    //
+    // The ordering guarantee is per MILLISECOND: a ULID's first 10 characters
+    // are the timestamp, the remaining 16 are fresh randomness on every call.
+    // Two keys minted inside the same millisecond therefore sort arbitrarily —
+    // which is fine, because nothing here depends on sub-millisecond order.
+    // Fake timers make that boundary explicit instead of leaving the test to
+    // win a coin flip on how fast the machine is.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      const first = stagingKey("usr_a");
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.001Z"));
+      const second = stagingKey("usr_a");
+      vi.setSystemTime(new Date("2026-01-01T06:00:00.000Z"));
+      const third = stagingKey("usr_a");
+
+      expect([third, first, second].sort()).toEqual([first, second, third]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("builds the documented component and template keys", () => {

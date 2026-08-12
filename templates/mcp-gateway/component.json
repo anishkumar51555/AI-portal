@@ -1,0 +1,75 @@
+{
+  "$schema": "http://localhost:3000/api/schemas/component-v1.json",
+  "specVersion": "1.0",
+  "name": "my-mcp-gateway",
+  "displayName": "My MCP Gateway",
+  "type": "mcp-gateway",
+  "version": "1.0.0",
+  "description": "TODO: describe the system this gateway exposes to MCP clients and what it lets them do.",
+  "author": {
+    "name": "TODO: Your Name"
+  },
+  "license": "MIT",
+  "keywords": ["starter", "mcp", "gateway"],
+  "runtime": {
+    "language": "typescript",
+    "minVersion": "20.0.0",
+    "dependencies": {
+      "@modelcontextprotocol/sdk": "^1.30.0",
+      "zod": "^4.4.3"
+    }
+  },
+  "entrypoint": "src/server.ts",
+  "mcp": {
+    "protocolVersion": "2025-06-18",
+    "transport": "stdio",
+    "command": {
+      "run": "node",
+      "args": ["dist/server.js"]
+    },
+    "endpoint": null,
+    "auth": {
+      "type": "none",
+      "envVars": []
+    },
+    "tools": [
+      {
+        "name": "search_notes",
+        "description": "Search the note collection by keyword and return matching notes with their titles and bodies. Call this when the user asks what is in their notes, or asks a question the notes might answer.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string", "description": "Keyword or phrase to search for" },
+            "limit": {
+              "type": "number",
+              "description": "Maximum notes to return (default 5)"
+            }
+          },
+          "required": ["query"]
+        },
+        "readOnly": true
+      },
+      {
+        "name": "add_note",
+        "description": "Store a new note. Call this when the user asks to remember, save, or jot something down.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string", "description": "Short title for the note" },
+            "body": { "type": "string", "description": "The note contents" }
+          },
+          "required": ["title", "body"]
+        },
+        "readOnly": false
+      }
+    ],
+    "resources": [
+      {
+        "uri": "notes://all",
+        "name": "All notes",
+        "mimeType": "application/json"
+      }
+    ],
+    "prompts": []
+  }
+}

@@ -18,21 +18,28 @@ unreliable.
 
 ## 2. Shared skeleton
 
+Every template archive has this shape. Note there is **no wrapping folder** — this is the
+zip root, because `component.json` must be the first thing a reader finds:
+
 ```
-‹type›-template/
+(archive root)
 ├── component.json          ← valid manifest, pre-filled with TODO markers
 ├── README.md               ← becomes the catalog detail page body
 ├── package.json            ← name matches component.json name
-├── tsconfig.json
-├── .gitignore
-├── .env.example            ← names only, never values
+├── tsconfig.json           ┐
+├── .gitignore              │
+├── scripts/pack.mjs        ├─ from templates/_shared/, merged in at build time
+├── docs/                   │
+│   └── GETTING-STARTED.md  ┘  ← 5-step "make it yours" guide
+├── .env.example            ← names only, never values (omitted where unused)
 ├── src/
 │   └── index.ts            ← the entrypoint declared in the manifest
-├── tests/
-│   └── index.test.ts       ← one passing test
-└── docs/
-    └── GETTING-STARTED.md  ← 5-step "make it yours" guide
+└── tests/
+    └── index.test.ts       ← one passing test
 ```
+
+In the repository these live in `templates/‹type›/`, with the four shared files factored
+out into `templates/_shared/` — see [§4](#4-build--publish-pipeline).
 
 `GETTING-STARTED.md` is identical across all four and is the most-read file in the whole
 project:
@@ -238,28 +245,68 @@ template from a demo into something a stranger can actually use in ten minutes.
 
 ## 4. Build & publish pipeline
 
-`scripts/build-templates.mjs`, run by `npm run templates:build` and by `prisma/seed.ts`:
+The pipeline is split across two scripts, at the line where it stops being pure:
+
+**`scripts/build-templates.mts`** — `npm run templates:build`, or `templates:verify` for
+steps 1–3 only:
 
 ```
 for each of the four templates:
-  1. read templates/‹type›-template/
+  1. read templates/‹type›/ and merge templates/_shared/
   2. VALIDATE component.json against the real manifestSchema   ← fail the build on error
   3. assert every declared path exists (entrypoint, handlers, instructions, systemPrompt)
   4. zip the DIRECTORY CONTENTS (manifest at zip root)          ← the rule users get wrong
-  5. compute sha256 + byte size
+  5. compute sha256 + byte size → templates/.dist/ + index.json
+```
+
+**`prisma/seed.ts`** — reads `templates/.dist/index.json`:
+
+```
   6. PutObject → templates/{type}/{templateVersion}/{type}-template-{v}.zip
   7. upsert the Template row with real size + checksum
 ```
 
 Steps 2 and 3 are the point. The templates are validated by the same code path that
 validates user uploads — there is exactly one validator, so the templates cannot silently
-drift from the spec. Wire this into CI as `npm run templates:verify`.
+drift from the spec. `npm run templates:verify` exits non-zero on any breach, which is what
+CI gates on.
+
+### Why the split
+
+Steps 1–5 are pure: filesystem in, zip out. Steps 6–7 need a live MinIO **and** a live
+Postgres. Keeping them apart means CI can verify all four manifests without starting a
+single container, and the seed never re-derives a checksum — it uploads the exact bytes
+`index.json` recorded, so the `Template.checksumSha256` row always describes the object
+actually in the bucket.
+
+### Two naming details
+
+- The **directories** are `templates/skill/`, not `templates/skill-template/`. The
+  `-template` suffix survives where it is user-visible: the archive filename
+  (`skill-template-1.0.0.zip`) and the package name inside each manifest.
+- The script is `.mts`, not `.mjs`, and runs under `tsx`. It has to be TypeScript to
+  import `manifestSchema` itself — a `.mjs` build script could only have re-implemented
+  the schema, which is precisely the drift this pipeline exists to prevent.
+
+### `templates/_shared/`
+
+Four files are byte-identical across all four templates — `tsconfig.json`, `.gitignore`,
+`scripts/pack.mjs`, `docs/GETTING-STARTED.md` — so they are stored once and merged in at
+step 1. A template may override any of them by shipping its own copy. The archive a
+developer downloads is complete either way; `tests/unit/templates.test.ts` asserts the
+merge actually happened rather than trusting it.
 
 ## 5. `/templates` page
 
-Four cards in a responsive grid. Each shows type badge, name, description, language,
-size, version, download count, and two buttons: **Download** and **View spec** (deep-links
-to the relevant section of [06](06-component-manifest-spec.md)).
+Four cards in a responsive grid. Each shows type badge, name, description, size, version,
+download count, and a **Download** button.
+
+> **Not yet built: the second "View spec" button.** It was specified here as a deep-link
+> to `template.docsUrl` (`/docs/{type}`), but nothing in
+> [09](09-implementation-plan.md) builds a `/docs/*` content site — only `/api/docs`
+> (Scalar) in task 5.11 — so the link would 404. `docsUrl` is still returned by
+> [`GET /api/templates`](03-api-contract.md#32-get-apitemplates-); the button returns when
+> the route exists.
 
 Above the grid, a three-step strip: **1. Download a template → 2. Build your component → 3. Publish it back.** Small piece of UI, and it is what makes a visitor understand the
 product in five seconds.

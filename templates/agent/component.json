@@ -1,0 +1,42 @@
+{
+  "$schema": "http://localhost:3000/api/schemas/component-v1.json",
+  "specVersion": "1.0",
+  "name": "my-agent",
+  "displayName": "My Agent",
+  "type": "agent",
+  "version": "1.0.0",
+  "description": "TODO: describe the agent's objective and the boundaries it works within.",
+  "author": {
+    "name": "TODO: Your Name"
+  },
+  "license": "MIT",
+  "keywords": ["starter", "agent", "research"],
+  "runtime": {
+    "language": "typescript",
+    "minVersion": "20.0.0",
+    "dependencies": {
+      "@anthropic-ai/sdk": "^0.116.0"
+    }
+  },
+  "entrypoint": "src/index.ts",
+  "agent": {
+    "systemPrompt": "prompts/system.md",
+    "model": {
+      "provider": "anthropic",
+      "preferred": "claude-opus-5",
+      "fallback": ["claude-haiku-4-5"],
+      "effort": "high",
+      "maxTokens": 16000
+    },
+    "tools": [{ "name": "calculator", "source": "builtin" }],
+    "maxIterations": 8,
+    "memory": {
+      "type": "conversation",
+      "maxMessages": 40
+    },
+    "guardrails": {
+      "requireHumanApproval": [],
+      "forbiddenTopics": []
+    }
+  }
+}

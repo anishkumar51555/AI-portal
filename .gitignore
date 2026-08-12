@@ -20,10 +20,14 @@ next-env.d.ts
 /blob-report
 /.playwright
 
-# generated test fixtures (rebuilt with `npm run fixtures:build`)
-/tests/fixtures/archives/*.zip
+# NOTE: tests/fixtures/archives/*.zip is deliberately NOT ignored.
+# The hostile-archive corpus is COMMITTED (rules/70-testing.md) so every machine
+# and CI run tests the byte-identical inputs. `npm run fixtures:build` regenerates
+# them, but a regenerated bomb.zip that differs subtly could pass a guard the
+# committed one catches — so the bytes, not the recipe, are the fixture.
 
 # built template archives (rebuilt with `npm run templates:build`)
+/templates/.dist/
 /templates/**/dist/
 /templates/*.zip
 

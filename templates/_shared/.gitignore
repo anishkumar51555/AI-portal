@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+
+# Real secrets. .env.example ships; nothing else does.
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
+Thumbs.db
+*.tsbuildinfo

@@ -17,7 +17,9 @@ export default tseslint.config(
       "test-results/**",
       "next-env.d.ts",
       "src/generated/**",
-      "templates/**/node_modules/**",
+      // Standalone projects with their own deps — see the note in tsconfig.json.
+      // Prettier still formats them; only linting and type-checking are skipped.
+      "templates/**",
     ],
   },
 

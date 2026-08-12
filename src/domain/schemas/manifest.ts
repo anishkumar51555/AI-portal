@@ -199,10 +199,23 @@ const agentBlock = z
         provider: z.enum(["anthropic", "openai", "google", "local"]),
         preferred: z.string().min(1),
         fallback: z.array(z.string()).max(3).default([]),
-        temperature: z.number().min(0).max(2).default(0.7),
+        // OPTIONAL, not defaulted. Current Anthropic models reject `temperature`
+        // outright with a 400 — a schema that always emits one would make every
+        // generated Anthropic agent fail on its first call. It stays in the spec
+        // because the manifest is provider-agnostic and OpenAI, Google, and local
+        // runtimes still accept it.
+        temperature: z.number().min(0).max(2).optional(),
+        // The Anthropic replacement for temperature-style tuning: how hard to
+        // think, rather than how randomly to sample.
+        effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
         maxTokens: z.number().int().positive().max(200_000).default(4096),
       })
-      .strict(),
+      .strict()
+      .refine((m) => !(m.provider === "anthropic" && m.temperature !== undefined), {
+        message:
+          "Anthropic models reject `temperature` (HTTP 400). Use `effort` instead — low | medium | high | xhigh | max.",
+        path: ["temperature"],
+      }),
     tools: z
       .array(
         z
@@ -342,6 +355,16 @@ export type ManifestType = ComponentManifest["type"];
 /** URL/manifest form (kebab) ↔ database form (SCREAMING_SNAKE). */
 export const URL_TYPES = ["skill", "plugin", "agent", "mcp-gateway"] as const;
 export const DB_TYPES = ["SKILL", "PLUGIN", "AGENT", "MCP_GATEWAY"] as const;
+
+/**
+ * The database spelling of a component type.
+ *
+ * Structurally identical to Prisma's generated `ComponentType`, and declared
+ * here so that services and components can name it without importing
+ * `@prisma/client` — which the dependency rule forbids them from doing, type or
+ * not (docs/01 §4). The repository layer converts at its own boundary.
+ */
+export type DbComponentType = (typeof DB_TYPES)[number];
 
 const TO_DB: Record<ManifestType, (typeof DB_TYPES)[number]> = {
   skill: "SKILL",

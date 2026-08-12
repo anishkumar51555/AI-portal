@@ -1,0 +1,34 @@
+{
+  "$schema": "http://localhost:3000/api/schemas/component-v1.json",
+  "specVersion": "1.0",
+  "name": "my-skill",
+  "displayName": "My Skill",
+  "type": "skill",
+  "version": "1.0.0",
+  "description": "TODO: describe what this skill does, in 10 to 300 characters.",
+  "author": {
+    "name": "TODO: Your Name"
+  },
+  "license": "MIT",
+  "keywords": ["starter", "skill"],
+  "runtime": {
+    "language": "typescript",
+    "minVersion": "20.0.0"
+  },
+  "entrypoint": "src/index.ts",
+  "skill": {
+    "instructions": "SKILL.md",
+    "allowedTools": ["read_file"],
+    "triggers": ["summarise this text", "give me a short summary"],
+    "outputs": [
+      { "name": "summary", "type": "string", "description": "The condensed text" },
+      { "name": "wordCount", "type": "number", "description": "Words in the summary" }
+    ],
+    "examples": [
+      {
+        "input": "Summarise the attached release notes",
+        "output": "Three bullet points covering the breaking changes."
+      }
+    ]
+  }
+}

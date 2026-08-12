@@ -1,0 +1,37 @@
+{
+  "$schema": "http://localhost:3000/api/schemas/component-v1.json",
+  "specVersion": "1.0",
+  "name": "my-plugin",
+  "displayName": "My Plugin",
+  "type": "plugin",
+  "version": "1.0.0",
+  "description": "TODO: describe what this plugin extends and what it does, in 10 to 300 characters.",
+  "author": {
+    "name": "TODO: Your Name"
+  },
+  "license": "MIT",
+  "keywords": ["starter", "plugin", "hooks"],
+  "runtime": {
+    "language": "typescript",
+    "minVersion": "20.0.0"
+  },
+  "entrypoint": "src/index.ts",
+  "plugin": {
+    "host": "claude-code",
+    "hooks": [
+      {
+        "event": "PreToolUse",
+        "matcher": "Write|Edit",
+        "handler": "src/hooks/guard-secrets.ts"
+      }
+    ],
+    "commands": [
+      {
+        "name": "count-todos",
+        "description": "Count TODO comments in the workspace",
+        "handler": "src/commands/count-todos.ts"
+      }
+    ],
+    "permissions": ["filesystem:read"]
+  }
+}

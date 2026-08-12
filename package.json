@@ -29,7 +29,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:seed": "tsx --env-file-if-exists=.env.local prisma/seed.ts",
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
     "templates:build": "tsx scripts/build-templates.mts",

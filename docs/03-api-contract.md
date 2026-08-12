@@ -123,15 +123,19 @@ Returns **503** with `"status": "degraded"` if any check fails.
 
 ### 3.2 `GET /api/templates` —
 
+Public — no session required. Discovery is the point: a visitor deciding whether to sign
+up needs to see what they would get. Only the download is gated (see §3.3).
+
 ```json
 {
   "data": [
     {
       "type": "SKILL",
-      "name": "Skill Starter",
-      "description": "Minimal Skill with instructions, tool allowlist, and a test harness.",
+      "urlType": "skill",
+      "name": "Skill Template",
+      "description": "A working extractive summariser with a passing test suite.",
       "version": "1.0.0",
-      "sizeBytes": 14208,
+      "sizeBytes": 9136,
       "checksumSha256": "9f2c…",
       "downloadCount": 42,
       "docsUrl": "/docs/templates#skill",
@@ -141,6 +145,20 @@ Returns **503** with `"status": "degraded"` if any check fails.
   ]
 }
 ```
+
+`type` is the database spelling and `urlType` the kebab-case URL spelling. Both are sent
+so a client never has to re-derive one from the other — that conversion is exactly where
+`MCP_GATEWAY` leaks into a URL, or `mcp-gateway` into a query (rules/00).
+
+`name` and `description` are **portal-authored catalog copy**, not the values in each
+template's own `component.json` — those deliberately hold placeholders (`my-skill`,
+"TODO: describe…") for the developer to replace, and rendering a TODO marker in the
+catalog would be a bug.
+
+> **`docsUrl` currently points at a route that does not exist.** No task in
+> [09](09-implementation-plan.md) builds a `/docs/*` content site — only `/api/docs`
+> (Scalar) in 5.11. The field is still returned because it is part of this contract; the
+> `/templates` page does not render a link to it until there is somewhere for it to point.
 
 ### 3.3 `GET /api/templates/:type/download` 🔒
 

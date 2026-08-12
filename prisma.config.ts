@@ -30,6 +30,10 @@ export default defineConfig({
 
   migrations: {
     path: "prisma/migrations",
-    seed: "tsx prisma/seed.ts",
+    // `.env.local` is this project's secrets file (docs/05 §2.3); the flag is
+    // Node's, and it runs before any module is evaluated. A top-level
+    // `dotenv` call inside seed.ts could NOT do this job: ESM hoists imports,
+    // so @/lib/env would parse an empty environment and throw first.
+    seed: "tsx --env-file-if-exists=.env.local prisma/seed.ts",
   },
 });
