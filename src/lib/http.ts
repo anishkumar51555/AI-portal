@@ -71,7 +71,14 @@ export function toResponse(err: unknown, requestId: string): NextResponse {
       { requestId, code: err.code, status: err.status, context: err.context },
       "handled error",
     );
-    return errorResponse(err.code, err.message, err.details, requestId, err.status);
+    return errorResponse(
+      err.code,
+      err.message,
+      err.details,
+      requestId,
+      err.status,
+      err.headers,
+    );
   }
 
   logger.error({ requestId, err }, "unhandled error");
@@ -84,6 +91,7 @@ function errorResponse(
   details: FieldError[] | undefined,
   requestId: string,
   status?: number,
+  extraHeaders?: Record<string, string>,
 ): NextResponse {
   const error = new AppError(code, message);
   const body: ErrorBody = {
@@ -96,7 +104,8 @@ function errorResponse(
   };
   return NextResponse.json(body, {
     status: status ?? error.status,
-    headers: { [REQUEST_ID_HEADER]: requestId },
+    // requestId last so a caller-supplied header can never overwrite it.
+    headers: { ...extraHeaders, [REQUEST_ID_HEADER]: requestId },
   });
 }
 

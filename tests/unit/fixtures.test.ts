@@ -1,10 +1,16 @@
 /**
  * Validates the hostile fixtures themselves.
  *
- * This runs BEFORE the archive inspector exists. Its job is to prove the test
- * harness works end to end and that each fixture actually contains the danger
- * it claims to — a "zip-slip" fixture with no `..` entry would let the real
- * inspector test pass while testing nothing.
+ * Its job is to prove each fixture actually contains the danger it claims to —
+ * a "zip-slip" fixture with no `..` entry would let the real inspector test
+ * pass while testing nothing.
+ *
+ * DELIBERATELY CARRIES NO FEATURE TAGS. It once tagged F3.1–F3.8, which are
+ * statements about what the INSPECTOR rejects — so `npm run test:matrix`
+ * reported those features as covered for days while no inspector existed. A
+ * coverage tracker that can be satisfied without the feature being built is
+ * worse than none, because it is trusted. Those tags now live in
+ * `archive.inspector.test.ts`, where the behaviour is actually exercised.
  *
  * Rebuild the fixtures with: npm run fixtures:build
  */
@@ -72,7 +78,7 @@ const ALL = [
   "not-a-zip.zip",
 ];
 
-describe("[F3.1][F3.2][F3.3][F3.4][F3.5] hostile archive fixtures", () => {
+describe("hostile archive fixtures", () => {
   beforeAll(() => {
     if (!existsSync(join(DIR, "valid.zip"))) {
       throw new Error("Fixtures missing. Run: npm run fixtures:build");
@@ -98,19 +104,19 @@ describe("[F3.1][F3.2][F3.3][F3.4][F3.5] hostile archive fixtures", () => {
     expect(entries.some((e) => e.isSymlink)).toBe(false);
   });
 
-  it("[F3.1] zip-slip.zip really contains a parent-directory escape", async () => {
+  it("zip-slip.zip really contains a parent-directory escape", async () => {
     const entries = await listEntries(join(DIR, "zip-slip.zip"), { raw: true });
     const offender = entries.find((e) => e.name.split("/").includes(".."));
     expect(offender, "no entry with a '..' path segment").toBeDefined();
     expect(offender?.name).toBe("../../evil.txt");
   });
 
-  it("[F3.2] absolute-path.zip really contains an absolute path", async () => {
+  it("absolute-path.zip really contains an absolute path", async () => {
     const entries = await listEntries(join(DIR, "absolute-path.zip"), { raw: true });
     expect(entries.some((e) => e.name.startsWith("/"))).toBe(true);
   });
 
-  it("[F3.2] windows-path.zip really contains a drive-prefixed path", async () => {
+  it("windows-path.zip really contains a drive-prefixed path", async () => {
     const entries = await listEntries(join(DIR, "windows-path.zip"), { raw: true });
     expect(entries.some((e) => /^[A-Za-z]:/.test(e.name.replace(/\\/g, "/")))).toBe(true);
   });
@@ -126,7 +132,7 @@ describe("[F3.1][F3.2][F3.3][F3.4][F3.5] hostile archive fixtures", () => {
     },
   );
 
-  it("[F3.3] bomb.zip is small on disk but expands past the 50 MB cap", async () => {
+  it("bomb.zip is small on disk but expands past the 50 MB cap", async () => {
     const path = join(DIR, "bomb.zip");
     const onDisk = (await stat(path)).size;
     const entries = await listEntries(path);
@@ -140,12 +146,12 @@ describe("[F3.1][F3.2][F3.3][F3.4][F3.5] hostile archive fixtures", () => {
     expect(expanded / onDisk).toBeGreaterThan(100);
   });
 
-  it("[F3.4] too-many-entries.zip exceeds the 1000-entry cap", async () => {
+  it("too-many-entries.zip exceeds the 1000-entry cap", async () => {
     const entries = await listEntries(join(DIR, "too-many-entries.zip"));
     expect(entries.length).toBeGreaterThan(1000);
   });
 
-  it("[F3.5] symlink.zip really contains a symlink entry", async () => {
+  it("symlink.zip really contains a symlink entry", async () => {
     const entries = await listEntries(join(DIR, "symlink.zip"));
     expect(
       entries.some((e) => e.isSymlink),
@@ -153,12 +159,12 @@ describe("[F3.1][F3.2][F3.3][F3.4][F3.5] hostile archive fixtures", () => {
     ).toBe(true);
   });
 
-  it("[F3.7] no-manifest.zip has no component.json anywhere", async () => {
+  it("no-manifest.zip has no component.json anywhere", async () => {
     const entries = await listEntries(join(DIR, "no-manifest.zip"));
     expect(entries.some((e) => e.name.endsWith("component.json"))).toBe(false);
   });
 
-  it("[F3.8] nested-manifest.zip has component.json exactly one level deep", async () => {
+  it("nested-manifest.zip has component.json exactly one level deep", async () => {
     const entries = await listEntries(join(DIR, "nested-manifest.zip"));
     const names = entries.map((e) => e.name);
 

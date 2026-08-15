@@ -67,8 +67,10 @@ expect(onEntry.mock.calls.length).toBeLessThan(50);
 ## Fixtures
 
 Malicious archive fixtures live in `tests/fixtures/archives/` and are committed:
-`valid.zip`, `zip-slip.zip`, `absolute-path.zip`, `bomb.zip`, `symlink.zip`,
-`too-many-entries.zip`, `no-manifest.zip`, `nested-manifest.zip`.
+`valid.zip`, `zip-slip.zip`, `backslash-traversal.zip`, `absolute-path.zip`,
+`windows-path.zip`, `bomb.zip`, `symlink.zip`, `too-many-entries.zip`,
+`no-manifest.zip`, `nested-manifest.zip`, `invalid-manifest.zip`, `not-a-zip.zip`.
+Full table in [`docs/11 §2.2`](../../docs/11-testing-strategy.md).
 
 Manifest fixtures live in `tests/fixtures/manifests/` — one valid and several invalid per
 type. Build fixtures with a script so they are reproducible.

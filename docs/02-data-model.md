@@ -386,7 +386,37 @@ model AuditLog {
   @@index([targetType, targetId])
   @@index([action, createdAt(sort: Desc)])
 }
+
+// Fixed-window rate-limit counter — one row per (key, window).
+model RateLimit {
+  key         String   @db.VarChar(128) // "presign:usr_abc" — scope + subject
+  windowStart DateTime
+  count       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@id([key, windowStart])
+  @@index([windowStart]) // for the expired-window sweep
+}
 ```
+
+### 3.1 `RateLimit` — the honest limitation
+
+Limits and windows are in [`docs/03 §4`](03-api-contract.md#4-rate-limits). Two properties
+of this implementation are worth stating plainly rather than glossing over:
+
+- **The counter is atomic.** `upsert` with `{ count: { increment: 1 } }` is a single
+  statement, so Postgres evaluates `count + 1` under the row lock. A `findUnique` followed
+  by an `update` would let two concurrent requests both read 9 and both write 10 — and the
+  eleventh request through would be allowed. There is an integration test that fires 20
+  concurrent increments and asserts the count is exactly 20.
+- **The window is fixed, not sliding.** A caller can spend a full allowance in the last
+  second of one window and again in the first second of the next, briefly achieving double
+  the nominal rate. That is acceptable for abuse damping — the guarantee that matters, no
+  unbounded flood, still holds — and it avoids a Redis dependency. Upstash with a sliding
+  window or token bucket is the upgrade if it ever needs to be exact.
+
+Rows accumulate one per subject per window, so `pruneWindowsBefore()` exists for a
+scheduled sweep. Nothing calls it on the request path.
 
 ## 4. Full-text search
 
@@ -415,6 +445,42 @@ CREATE INDEX IF NOT EXISTS "Component_displayName_trgm_idx"
 
 A `GENERATED ALWAYS ... STORED` column is preferable to a trigger: Postgres maintains it
 automatically, it cannot drift, and there is no trigger function to keep in sync.
+
+### 4.1 Both indexes MUST also be declared in `schema.prisma`
+
+This bit is not optional, and it is not obvious:
+
+```prisma
+searchVector Unsupported("tsvector")? @default(dbgenerated())
+
+@@index([searchVector], type: Gin)
+@@index([displayName(ops: raw("gin_trgm_ops"))], type: Gin, map: "Component_displayName_trgm_idx")
+```
+
+`prisma migrate dev` diffs `schema.prisma` against the database. Anything the schema does
+not mention is, as far as Prisma is concerned, something that should not exist — so
+without these three lines **every future migration silently emits**:
+
+```sql
+DROP INDEX "Component_displayName_trgm_idx";
+DROP INDEX "Component_searchVector_idx";
+ALTER TABLE "Component" ALTER COLUMN "searchVector" DROP DEFAULT;  -- fails
+```
+
+This actually happened while adding the unrelated `RateLimit` table on 2026-08-12. The
+`ALTER` fails outright against a generated column (`use DROP EXPRESSION instead`), taking
+the whole migration down with it — but the two `DROP INDEX` statements had already
+committed. Search kept working, via a sequential scan, with nothing logged. That is the
+worst shape a performance bug can take.
+
+`@default(dbgenerated())` does not create a default. It tells Prisma the database supplies
+the value, which is what suppresses the `DROP DEFAULT`.
+
+**After any migration, confirm the diff is empty:**
+
+```bash
+npx prisma migrate dev --name check --create-only   # must produce "This is an empty migration."
+```
 
 Query it from the repository layer with a typed raw query:
 

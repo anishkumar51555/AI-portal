@@ -219,9 +219,32 @@ export async function inspectArchive(
 }
 ```
 
-Two properties matter: it is **streaming** (nothing large is ever buffered) and it
-**aborts on the first breach** (a bomb is never fully read). `adm-zip` cannot do either —
-that is the whole reason for choosing `yauzl`.
+Two properties matter: **nothing large is ever inflated**, and it **aborts on the first
+breach** (a bomb is never fully read). `adm-zip` cannot do either — that is the whole
+reason for choosing `yauzl`.
+
+### What "streaming" can and cannot mean here
+
+The sketch above shows `walk(stream)`, but a ZIP's central directory lives at the **end**
+of the file, so any zip reader needs random access. Genuinely streaming zip parsing is not
+possible; the shipped implementation buffers the archive and calls `yauzl.fromBuffer`.
+
+That is safe, and the distinction is worth being precise about in an interview:
+
+- The **compressed** archive is buffered, and is hard-capped at `MAX_UPLOAD_BYTES` (10 MB)
+  three times over — by `content-length-range` in the presigned POST, by the `HeadObject`
+  re-check, and again by the inspector as it reads.
+- The **decompressed** content is what is unbounded and dangerous, and none of it is ever
+  inflated. Every guard reads `uncompressedSize` and `compressedSize` from the entry's
+  central-directory record, so a 10 MB archive claiming to expand to 64 MB is rejected on
+  the entry that says so — `openReadStream` is called only for `component.json` and
+  `README.md`, each with its own byte cap.
+
+Measured on `bomb.zip` (8 × 8 MB of zeros): rejected at **entry 2 of 9**, with zero bytes
+inflated.
+
+The `onEntry` hook exists so a test can assert that abort position directly. Asserting
+"it eventually rejects" would pass for an implementation that reads the whole bomb first.
 
 **These are the easiest high-value unit tests in the project.** Build the malicious
 fixtures by hand and assert each rejection. Six tests, and they are the ones to show

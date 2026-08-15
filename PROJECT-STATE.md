@@ -1,10 +1,10 @@
 ---
-phase: P2
-phase_name: Data model, storage, templates
-last_task: "P2 2.8/2.9 - templates API, gated download, /templates page. PHASE 2 COMPLETE (13/13)"
-next_task: "Phase 3 - 3.1 archive.inspector (streaming zip guards). THE CRITICAL PATH."
+phase: P3
+phase_name: Manifest validation and publishing (CRITICAL PATH)
+last_task: "P3 3.10-3.12 - publish wizard, inline manifest errors, dashboard. PHASE 3 CODE COMPLETE."
+next_task: "Phase 4 - 4.1/4.2 component.repository.search() + GET /api/components (catalog + facets)"
 blocked_by: none
-updated: 2026-08-12
+updated: 2026-08-14
 ---
 
 # Project state
@@ -44,8 +44,17 @@ end to end: `User(anishkumar51555)` + `Account(github/oauth)` +
   against a running dev server: the page renders, an anonymous download gets 401, and
   following the real presigned URL returns the archive bytes.
 
-Verified green: `npm run gate` (254 unit), `npm run test:integration` (36 against live
-Postgres + MinIO), `npm run test` (290 together), P0 / P1 / **P2** feature gates.
+**Phase 3 is CODE COMPLETE** — 21/22 features, P3 gate passed. The full loop works:
+download a template → publish it back → see it on the dashboard.
+The archive inspector, the manifest validator, presign + rate limiting, and the publish
+transaction all work end to end. The one remaining P3 feature (F3.22) is the wizard E2E.
+
+**The round trip the product promises is verified**: a Skill template built by
+`templates:build`, unmodified, publishes back through `POST /api/components` and lands in
+the catalog as a `SKILL`. There is a standing integration test for exactly that.
+
+Verified green: `npm run gate` (299 unit), `npm run test:integration` (93 against live
+Postgres + MinIO), `npm run test` (392 together), P0 / P1 / P2 / **P3** feature gates.
 
 ## Docker — resolved, and the misdiagnosis worth remembering
 
@@ -134,39 +143,62 @@ npm run dev
 - [x] 2.10 `templates:verify` wired into CI (static job)
 - [x] 2.8 / 2.9 `GET /api/templates` + download + `/templates` page → F2.12 (7 tests)
 
-## Next up — Phase 3 (the critical path)
+## Phase 3 — code complete (the critical path)
 
-`docs/09-implementation-plan.md` Phase 3. Start with **3.1 `archive.inspector`** — the
-streaming zip reader that enforces every guard in rules/50. The hostile fixtures it must
-defeat are already built and committed in `tests/fixtures/archives/`.
-
-Remember the decision already recorded below: it MUST open yauzl with
-`decodeStrings: false` and run its own path checks, or yauzl throws an opaque error that
-surfaces as a 500 instead of a 422.
+- [x] 3.1 / 3.2 `archive.inspector.ts` + the hostile fixtures → F3.1–F3.8 (21 tests)
+- [x] 3.3 `manifest.validator.ts` — parse, schema, secrets, archive + version cross-checks
+      → F3.9, F3.18 (24 tests)
+- [x] 3.4 Nested-manifest hint — produced by the inspector, surfaced by the wizard's
+      error panel ("found my-skill/component.json … zip the CONTENTS")
+- [x] 3.5 `POST /api/uploads/presign` · 3.6 `RateLimit` model + service
+      → F3.10, F3.11, F3.21 (26 integration tests)
+- [x] 3.7 / 3.8 The publish transaction — `POST /api/components` and `…/:slug/versions`
+      → F3.12–F3.20 (21 integration tests). **P3 gate PASSES.**
+- [x] 3.10–3.12 `/publish` wizard, inline manifest-error rendering, dashboard list + `GET /api/me/components` (5 integration tests)
+- [ ] 3.9 `GET …/versions/:version/download` — deferred; it is also P4 task 4.11
+- [ ] F3.22 (wizard E2E) — needs `npx playwright install chromium` (~150 MB)
 
 ## Decisions made during the build
 
-| Date       | Decision                                                                                                             | Why                                                                                                                                                                          |
-| ---------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-08-09 | TypeScript **6.0.3**, ESLint **9.39.5** — not 7 / 10                                                                 | `typescript-eslint` needs TS `<6.1.0`; both ESLint plugins cap at 9. [ADR-011](docs/adr/ADR-011-toolchain-outcome.md)                                                        |
-| 2026-08-09 | Dropped `baseUrl`; added `allowImportingTsExtensions`                                                                | `baseUrl` is removed in TS 7; scripts import sibling `.ts` via tsx                                                                                                           |
-| 2026-08-09 | Boundary rules use core `no-restricted-imports`                                                                      | One less plugin; works on ESLint 9 and 10                                                                                                                                    |
-| 2026-08-09 | ESLint parser set explicitly to `tseslint.parser`                                                                    | `eslint-config-next` installs its own, which silently disables every type-aware rule                                                                                         |
-| 2026-08-09 | **Prisma 7 removed `url` from `datasource`**                                                                         | Connection moved to `prisma.config.ts`; runtime needs `@prisma/adapter-pg`. docs/02 §3 updated.                                                                              |
-| 2026-08-09 | Services may not import `@/server/db` either                                                                         | Closing a hole: it exports PrismaClient, so a service could bypass repositories                                                                                              |
-| 2026-08-09 | Augment `@auth/core/jwt`, **not** `next-auth/jwt`                                                                    | The latter is a bare re-export; augmenting it silently does nothing and `token.role` stays `unknown`                                                                         |
-| 2026-08-09 | Separate `ai-portal-test` bucket, alongside `ai_portal_test` DB                                                      | Integration tests truncate and upload freely without touching dev data                                                                                                       |
-| 2026-08-09 | Diagnose Docker with `docker info`, never `wsl --list --verbose`                                                     | WSL reports the distro `Stopped` while Docker Desktop 29.x serves fine — it caused a false "backend hung" diagnosis                                                          |
-| 2026-08-10 | Presigned **POST**, not PUT, for uploads                                                                             | Only a POST policy supports `content-length-range`; a PUT can pin one exact length that the client itself reported                                                           |
-| 2026-08-09 | **shadcn now ships Base UI, not Radix**                                                                              | Composition is `render={<El/>}`, not `asChild`. Every Radix-era shadcn snippet online is wrong for this version.                                                             |
-| 2026-08-09 | `SiteHeader` lives in `src/app/_components/`, not `src/components/`                                                  | It reads the session; the dependency rule forbids `components/` importing `server/`                                                                                          |
-| 2026-08-09 | Path-traversal fixtures forged byte-by-byte                                                                          | `archiver` sanitizes entry names and cannot emit a malicious archive                                                                                                         |
-| 2026-08-09 | `archive.inspector` MUST use `decodeStrings: false`                                                                  | yauzl's own validation throws an opaque error that would surface as a 500, not a 422                                                                                         |
-| 2026-08-12 | Template archives are **byte-reproducible**: fixed entry date, sorted entries, `append(buffer)` not `archive.file()` | `archive.file()` writes in async-completion order and archiver stamps wall-clock time, so the sha256 changed on every rebuild — a checksum that moves cannot verify anything |
-| 2026-08-12 | Entry sort uses code-unit comparison, **not `localeCompare`**                                                        | Locale collation varies with the runtime's ICU data, which would make the "reproducible" build machine-dependent                                                             |
-| 2026-08-12 | Build script does steps 1–5; the **seed** does upload + upsert                                                       | Steps 1–5 are pure, so CI validates all four manifests with no containers. docs/07 §4 updated to match.                                                                      |
-| 2026-08-12 | Template catalog copy is authored in the seed, not read from the manifests                                           | The templates' own manifests carry `my-skill` / "TODO: describe…" placeholders — rendering those on /templates is a bug                                                      |
-| 2026-08-12 | Seed env via Node's `--env-file-if-exists=.env.local`                                                                | ESM hoists imports, so a top-level `dotenv` call in seed.ts would run _after_ `@/lib/env` had already parsed and thrown                                                      |
+| Date       | Decision                                                                                                             | Why                                                                                                                                                                                                                                                          |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-08-09 | TypeScript **6.0.3**, ESLint **9.39.5** — not 7 / 10                                                                 | `typescript-eslint` needs TS `<6.1.0`; both ESLint plugins cap at 9. [ADR-011](docs/adr/ADR-011-toolchain-outcome.md)                                                                                                                                        |
+| 2026-08-09 | Dropped `baseUrl`; added `allowImportingTsExtensions`                                                                | `baseUrl` is removed in TS 7; scripts import sibling `.ts` via tsx                                                                                                                                                                                           |
+| 2026-08-09 | Boundary rules use core `no-restricted-imports`                                                                      | One less plugin; works on ESLint 9 and 10                                                                                                                                                                                                                    |
+| 2026-08-09 | ESLint parser set explicitly to `tseslint.parser`                                                                    | `eslint-config-next` installs its own, which silently disables every type-aware rule                                                                                                                                                                         |
+| 2026-08-09 | **Prisma 7 removed `url` from `datasource`**                                                                         | Connection moved to `prisma.config.ts`; runtime needs `@prisma/adapter-pg`. docs/02 §3 updated.                                                                                                                                                              |
+| 2026-08-09 | Services may not import `@/server/db` either                                                                         | Closing a hole: it exports PrismaClient, so a service could bypass repositories                                                                                                                                                                              |
+| 2026-08-09 | Augment `@auth/core/jwt`, **not** `next-auth/jwt`                                                                    | The latter is a bare re-export; augmenting it silently does nothing and `token.role` stays `unknown`                                                                                                                                                         |
+| 2026-08-09 | Separate `ai-portal-test` bucket, alongside `ai_portal_test` DB                                                      | Integration tests truncate and upload freely without touching dev data                                                                                                                                                                                       |
+| 2026-08-09 | Diagnose Docker with `docker info`, never `wsl --list --verbose`                                                     | WSL reports the distro `Stopped` while Docker Desktop 29.x serves fine — it caused a false "backend hung" diagnosis                                                                                                                                          |
+| 2026-08-10 | Presigned **POST**, not PUT, for uploads                                                                             | Only a POST policy supports `content-length-range`; a PUT can pin one exact length that the client itself reported                                                                                                                                           |
+| 2026-08-09 | **shadcn now ships Base UI, not Radix**                                                                              | Composition is `render={<El/>}`, not `asChild`. Every Radix-era shadcn snippet online is wrong for this version.                                                                                                                                             |
+| 2026-08-09 | `SiteHeader` lives in `src/app/_components/`, not `src/components/`                                                  | It reads the session; the dependency rule forbids `components/` importing `server/`                                                                                                                                                                          |
+| 2026-08-09 | Path-traversal fixtures forged byte-by-byte                                                                          | `archiver` sanitizes entry names and cannot emit a malicious archive                                                                                                                                                                                         |
+| 2026-08-09 | `archive.inspector` MUST use `decodeStrings: false`                                                                  | yauzl's own validation throws an opaque error that would surface as a 500, not a 422                                                                                                                                                                         |
+| 2026-08-12 | Template archives are **byte-reproducible**: fixed entry date, sorted entries, `append(buffer)` not `archive.file()` | `archive.file()` writes in async-completion order and archiver stamps wall-clock time, so the sha256 changed on every rebuild — a checksum that moves cannot verify anything                                                                                 |
+| 2026-08-12 | Entry sort uses code-unit comparison, **not `localeCompare`**                                                        | Locale collation varies with the runtime's ICU data, which would make the "reproducible" build machine-dependent                                                                                                                                             |
+| 2026-08-12 | Build script does steps 1–5; the **seed** does upload + upsert                                                       | Steps 1–5 are pure, so CI validates all four manifests with no containers. docs/07 §4 updated to match.                                                                                                                                                      |
+| 2026-08-12 | Template catalog copy is authored in the seed, not read from the manifests                                           | The templates' own manifests carry `my-skill` / "TODO: describe…" placeholders — rendering those on /templates is a bug                                                                                                                                      |
+| 2026-08-12 | Seed env via Node's `--env-file-if-exists=.env.local`                                                                | ESM hoists imports, so a top-level `dotenv` call in seed.ts would run _after_ `@/lib/env` had already parsed and thrown                                                                                                                                      |
+| 2026-08-12 | Inspector **buffers the compressed archive**, though docs/08 said "streaming"                                        | A ZIP's central directory is at the END of the file, so random access is unavoidable. What must never be inflated is the DECOMPRESSED content, and none of it is. docs/08 §4.2 rewritten to state this precisely                                             |
+| 2026-08-12 | Added a 12th fixture, `backslash-traversal.zip`                                                                      | Mutation testing showed path normalisation was UNTESTED — `windows-path.zip` is caught by the drive-letter check either way. With normalisation disabled, `..\..\evil.txt` was accepted outright                                                             |
+| 2026-08-12 | Bomb test asserts `onEntry` fired **exactly 2** times, not "fewer than 9"                                            | The ratio guard trips on the first payload entry. A loose bound would still pass for an implementation that read the whole bomb first                                                                                                                        |
+| 2026-08-12 | `fixtures.test.ts` stripped of its F3.1–F3.8 tags                                                                    | It proves the FIXTURES contain their attacks, not that the inspector rejects them — so `test:matrix` reported all eight as covered while no inspector existed. A tracker that can be satisfied without the feature is worse than none, because it is trusted |
+| 2026-08-12 | Version ordering throws `VERSION_EXISTS` / `VERSION_NOT_INCREASING` (409), separate from `MANIFEST_INVALID` (422)    | The file is valid; it conflicts with what is published. Collapsing them would tell a publisher to "fix your manifest" when the only problem is the number they chose                                                                                         |
+| 2026-08-12 | The seed was writing **spec-invalid manifests** — now validated by `validateManifest`                                | It used `manifestVersion` instead of `specVersion` and omitted 3 required fields, so all 8 demo components stored manifests violating the spec the product enforces. Nothing caught it because the seed never validated its own output                       |
+| 2026-08-12 | Bad-discriminator gets a bespoke message instead of Zod's                                                            | A discriminated union suppresses every other field error until `type` is valid, so the raw "Invalid discriminator value" is both cryptic and misleadingly narrow                                                                                             |
+| 2026-08-12 | **Both search indexes are now declared in `schema.prisma`**, and `searchVector` carries `@default(dbgenerated())`    | Without them `migrate dev` emits `DROP INDEX` for both plus a `DROP DEFAULT` that fails on a generated column. It actually happened: the indexes were dropped, the migration then failed, and search silently fell back to a sequential scan. docs/02 §4.1   |
+| 2026-08-12 | `AppError` gained a `headers` field, merged by `toResponse`                                                          | A 429 without `Retry-After` is not a contract-compliant 429, and `context` is log-only. One place still formats every error                                                                                                                                  |
+| 2026-08-12 | `test:matrix` refuses a tag from the wrong test level                                                                | Three features had been marked green by unit tests of helpers, before the endpoints they describe existed. Wrong-level tags no longer count toward coverage; the honest number dropped 40 → 37                                                               |
+| 2026-08-12 | Rate limiting is a fixed window with an atomic `increment`, not sliding                                              | Atomic because read-then-write loses concurrent increments (tested with 20 parallel calls). Fixed-window because the boundary burst is acceptable for abuse damping and avoids a Redis dependency — stated in docs/02 §3.1 rather than glossed over          |
+| 2026-08-13 | The `UPLOAD_REJECTED` audit write is **awaited**, not fire-and-forget                                                | A serverless instance can freeze the instant it responds, so an un-awaited write may never land. Caught by a test that read the row back and found nothing. Safe to await — the helper swallows its own errors                                               |
+| 2026-08-13 | Checksum uniqueness is checked **before** slug uniqueness                                                            | A retry of a successful publish trips both. Only `DUPLICATE_ARCHIVE` names the component it already went out as; `SLUG_TAKEN` would tell the publisher to rename something already theirs                                                                    |
+| 2026-08-13 | `test:matrix` levels are a HIERARCHY, not exact matches                                                              | An integration test satisfying a `unit` feature is more evidence, not less. Only the downward direction — a unit test claiming an integration feature — is a lie                                                                                             |
+| 2026-08-13 | Manifest→Prisma JSON conversion lives in the repository, not the service                                             | `InputJsonValue` cannot express the manifest's `Record<string, unknown>` fields, and the boundary rule bans `@prisma/client` in services — including type-only imports                                                                                       |
+| 2026-08-14 | Upload uses `XMLHttpRequest`, not `fetch`                                                                            | `fetch` still cannot report upload progress in any shipping browser — there is no readable stream for the request body — so a progress bar built on it can only be a lie                                                                                     |
+| 2026-08-14 | The wizard NEVER clears the selected file on an error                                                                | Making someone re-pick a 10 MB archive to retry a one-character manifest typo is the fastest way to lose them. Every failure path returns to "Try again" with the file intact                                                                                |
+| 2026-08-14 | `/api/me/components` deliberately does NOT filter `deletedAt` or `status`                                            | It is the inverse of every other read path. "Where did my component go?" is worse than seeing it flagged as suspended or deleted                                                                                                                             |
 
 ## Known issues / watch list
 
@@ -174,7 +206,12 @@ surfaces as a 500 instead of a 422.
 - `wsl --list --verbose` lies about Docker Desktop 29.x — it says `Stopped` while the
   engine serves fine. Use `docker info`, never the WSL distro state.
 - Docker is not on the default PATH; open a new terminal after installing.
-- Playwright browsers not installed: `npx playwright install chromium` (~150 MB). This is
+- Playwright browsers not installed: `npx playwright install chromium` (~150 MB). This
+  blocks F3.22 (wizard E2E) and means **the signed-in rendering of `/publish` and
+  `/dashboard` has not been eyeballed by anyone** — anonymous requests are verified to
+  redirect to `/login?callbackUrl=…`, and every server path behind them has integration
+  tests, but the authenticated pages themselves are unviewed. Open them in the browser
+  you are already signed into. This is
   also why the 375 px no-horizontal-scroll check in rules/60 has not been verified for
   `/templates` — the layout is single-column on mobile, but nobody has actually looked.
 - `/catalog` is linked from the site header and 404s. Pre-existing since Phase 1; it is
@@ -185,20 +222,21 @@ surfaces as a 500 instead of a 422.
 
 ## Health
 
-| Check                      | Status                                                              |
-| -------------------------- | ------------------------------------------------------------------- |
-| `npm run format:check`     | ✅ clean                                                            |
-| `npm run lint`             | ✅ clean (type-aware)                                               |
-| `npm run typecheck`        | ✅ clean                                                            |
-| `npm run build`            | ✅ 5 routes + middleware                                            |
-| `npm run test:unit`        | ✅ 254 / 254                                                        |
-| `npm run test`             | ✅ 290 / 290 (unit + integration together)                          |
-| `npm run test:matrix`      | 37 / 65 · P0 5/5 · P1 7/7 · **P2 13/13**                            |
-| `npm run test:integration` | ✅ 36 / 36 against live Postgres + MinIO                            |
-| `npm run templates:verify` | ✅ all 4 satisfy spec v1.0; non-zero exit on a breach               |
-| `npm run db:seed`          | ✅ idempotent — 3 runs, identical rows                              |
-| Feature gates              | ✅ P0 PASSED · P1 PASSED · P2 PASSED                                |
-| Docker stack               | ✅ postgres + minio healthy; buckets `ai-portal`, `ai-portal-test`  |
-| Migrations                 | ✅ 4 applied to both DBs; searchVector is GENERATED ALWAYS          |
-| `npm run test:e2e`         | ⛔ not run — needs `.env.local` + `npx playwright install chromium` |
-| Hooks                      | ✅ all three verified                                               |
+| Check                        | Status                                                              |
+| ---------------------------- | ------------------------------------------------------------------- |
+| `npm run format:check`       | ✅ clean                                                            |
+| `npm run lint`               | ✅ clean (type-aware)                                               |
+| `npm run typecheck`          | ✅ clean                                                            |
+| `npm run build`              | ✅ 14 routes + middleware                                           |
+| `npm run test:unit`          | ✅ 275 / 275                                                        |
+| `npm run test`               | ✅ 311 / 311 (unit + integration together)                          |
+| `npm run test:matrix`        | 46 / 65 · P0 5/5 · P1 7/7 · P2 13/13 · **P3 21/22**                 |
+| `archive.inspector` coverage | ✅ 96.77% stmts / 91.83% branch (bar: 95 / 90)                      |
+| `npm run test:integration`   | ✅ 36 / 36 against live Postgres + MinIO                            |
+| `npm run templates:verify`   | ✅ all 4 satisfy spec v1.0; non-zero exit on a breach               |
+| `npm run db:seed`            | ✅ idempotent — 3 runs, identical rows                              |
+| Feature gates                | ✅ P0 PASSED · P1 PASSED · P2 PASSED                                |
+| Docker stack                 | ✅ postgres + minio healthy; buckets `ai-portal`, `ai-portal-test`  |
+| Migrations                   | ✅ 4 applied to both DBs; searchVector is GENERATED ALWAYS          |
+| `npm run test:e2e`           | ⛔ not run — needs `.env.local` + `npx playwright install chromium` |
+| Hooks                        | ✅ all three verified                                               |

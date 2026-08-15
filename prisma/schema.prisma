@@ -140,7 +140,13 @@ model Component {
   // GENERATED ALWAYS ... STORED, added in a hand-written migration because
   // Prisma cannot express generated columns. Postgres maintains it, so it
   // cannot go stale (ADR-008). NEVER write to this column.
-  searchVector Unsupported("tsvector")?
+  //
+  // `@default(dbgenerated())` does not create a default — it tells Prisma the
+  // database supplies this value, which stops `migrate dev` from emitting
+  // `ALTER COLUMN ... DROP DEFAULT` on every future migration. That statement
+  // fails outright against a generated column ("use DROP EXPRESSION instead"),
+  // taking any unrelated migration down with it.
+  searchVector Unsupported("tsvector")? @default(dbgenerated())
 
   versions  ComponentVersion[] @relation("ComponentVersions")
   tags      ComponentTag[]
@@ -154,6 +160,14 @@ model Component {
   @@index([ownerId])
   @@index([downloadCount(sort: Desc)])
   @@index([createdAt(sort: Desc)])
+  // The two search indexes are DECLARED HERE even though a hand-written
+  // migration created them. Prisma diffs the schema against the database, so an
+  // index it cannot see is an index it believes should not exist — and
+  // `migrate dev` silently emitted `DROP INDEX` for both while adding an
+  // unrelated table. Search kept working, just via a sequential scan, which is
+  // the failure mode nobody notices until the catalog is large.
+  @@index([searchVector], type: Gin)
+  @@index([displayName(ops: raw("gin_trgm_ops"))], type: Gin, map: "Component_displayName_trgm_idx")
 }
 
 model ComponentVersion {
@@ -268,4 +282,27 @@ model AuditLog {
   @@index([actorId, createdAt(sort: Desc)])
   @@index([targetType, targetId])
   @@index([action, createdAt(sort: Desc)])
+}
+
+// ─────────────────────────── rate limiting ───────────────────────────
+
+// Fixed-window counter, one row per (key, window).
+//
+// HONEST LIMITATION: this is not distributed-perfect. Two requests arriving in
+// the same millisecond can both read a count below the limit before either
+// commits, so a determined caller can exceed the cap by a small margin at a
+// window boundary. That is acceptable for abuse damping — the guarantee that
+// matters (no unbounded flood) holds — and it avoids a Redis dependency for a
+// student project. Swap in Upstash if it ever needs to be exact (docs/03 §4).
+model RateLimit {
+  // "presign:usr_abc" — scope prefix plus the subject the limit keys on.
+  key         String   @db.VarChar(128)
+  windowStart DateTime
+  count       Int      @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@id([key, windowStart])
+  // Sweeping expired windows: DELETE WHERE windowStart < now() - interval.
+  @@index([windowStart])
 }

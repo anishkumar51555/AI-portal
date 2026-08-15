@@ -94,7 +94,7 @@ describe("[F1.2] requireRole", () => {
   });
 });
 
-describe("[F1.4] requireFreshRole re-reads the role from the database", () => {
+describe("requireFreshRole re-reads the role from the database", () => {
   it("rejects a stale ADMIN token after a demotion", async () => {
     // The JWT still says ADMIN; the database says USER. A token minted before a
     // demotion stays valid for up to 24h — unacceptable for destructive actions.

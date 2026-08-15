@@ -77,6 +77,71 @@ async function collectHits(): Promise<Map<string, Hit[]>> {
   return hits;
 }
 
+/**
+ * Which test directories may satisfy a feature of a given level.
+ *
+ * A feature declared `integration` asserts something about a running endpoint
+ * against a real database. A unit test of the helper that endpoint will one day
+ * call does NOT establish it — and tagging it there marks the feature green
+ * before the endpoint exists. That has happened three times in this project
+ * (F3.1–F3.8, F3.12, F3.14), which is why it is now enforced rather than
+ * remembered.
+ */
+const LEVEL_DIRS: Record<Feature["level"], string[]> = {
+  // A HIGHER level satisfies a lower one: an integration test that exercises a
+  // pure helper end to end is more evidence than a unit test, not less. Only
+  // the downward direction is a lie — a unit test of a helper cannot establish
+  // that an endpoint calls it.
+  unit: ["tests/unit/", "tests/integration/", "tests/e2e/"],
+  integration: ["tests/integration/", "tests/e2e/"],
+  e2e: ["tests/e2e/"],
+  manual: ["tests/unit/", "tests/integration/", "tests/e2e/"],
+};
+
+/**
+ * Keep only the tags that sit in a directory able to establish the feature.
+ *
+ * Coverage is computed from THIS, not from the raw tags — otherwise a unit test
+ * of a helper marks an integration feature green, which is precisely the false
+ * confidence the matrix exists to prevent.
+ */
+function hitsAtCorrectLevel(features: Feature[], hits: Map<string, Hit[]>) {
+  const filtered = new Map<string, Hit[]>();
+
+  for (const feature of features) {
+    const found = hits.get(feature.id);
+    if (!found) continue;
+
+    const allowed = LEVEL_DIRS[feature.level];
+    const valid = found.filter((h) => allowed.some((dir) => h.file.startsWith(dir)));
+    if (valid.length > 0) filtered.set(feature.id, valid);
+  }
+
+  return filtered;
+}
+
+/** Tags found in a directory that cannot satisfy the feature's declared level. */
+function misplacedTags(features: Feature[], hits: Map<string, Hit[]>) {
+  const problems: Array<{ id: string; level: string; files: string[] }> = [];
+
+  for (const feature of features) {
+    const found = hits.get(feature.id);
+    if (!found) continue;
+
+    const allowed = LEVEL_DIRS[feature.level];
+    const wrong = found.filter((h) => !allowed.some((dir) => h.file.startsWith(dir)));
+    if (wrong.length > 0) {
+      problems.push({
+        id: feature.id,
+        level: feature.level,
+        files: wrong.map((w) => w.file),
+      });
+    }
+  }
+
+  return problems;
+}
+
 function render(features: Feature[], hits: Map<string, Hit[]>) {
   const phases = [...new Set(features.map((f) => f.phase))].sort();
   let totalCovered = 0;
@@ -151,8 +216,32 @@ if (features.length === 0) {
   process.exit(1);
 }
 
-const hits = await collectHits();
+const rawHits = await collectHits();
+const hits = hitsAtCorrectLevel(features, rawHits);
 const critMissing = render(features, hits);
+
+// A tag in the wrong kind of test file is worse than a missing tag: it reports
+// the feature as covered. Always checked, and fatal under --gate.
+const misplaced = misplacedTags(features, rawHits);
+if (misplaced.length > 0) {
+  console.error(
+    `${C.red}${C.bold}MISPLACED TAGS${C.reset} — these features are declared at one ` +
+      `level but claimed by a test at another:
+` +
+      misplaced
+        .map(
+          (m) =>
+            `  ${m.id}  (level: ${m.level})  claimed by ${m.files.join(", ")}\n` +
+            `        A ${m.level} feature cannot be established by that file.`,
+        )
+        .join("\n") +
+      "\n",
+  );
+  // Fatal only when the tag is the ONLY thing claiming the feature — that is a
+  // false green. A stray beside a correctly-levelled tag is just untidy.
+  const falselyCovered = misplaced.filter((m) => !hits.has(m.id));
+  if (falselyCovered.length > 0 && args.includes("--gate")) process.exit(1);
+}
 
 if (args.includes("--gate")) {
   if (critMissing.length > 0) {

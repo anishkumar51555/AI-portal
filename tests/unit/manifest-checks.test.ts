@@ -134,7 +134,7 @@ describe("[F2.7] manifest cross-validated against its archive", () => {
   });
 });
 
-describe("[F3.19] immutable identity across versions", () => {
+describe("immutable identity across versions", () => {
   it("rejects a rename", () => {
     const errors = checkAgainstExisting(validSkill, { name: "old-name", type: "skill" });
     expect(errors.map((e) => e.path)).toContain("name");

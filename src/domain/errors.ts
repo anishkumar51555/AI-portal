@@ -60,6 +60,16 @@ export class AppError extends Error {
   readonly details?: FieldError[];
   /** Internal context for logs. NEVER serialized into a response. */
   readonly context?: Record<string, unknown>;
+  /**
+   * Extra response headers this error requires.
+   *
+   * Exists for the errors where a header is part of the contract rather than
+   * decoration — a 429 without `Retry-After` gives the client nothing to back
+   * off on (docs/03 §4). Kept separate from `context` because context is
+   * log-only; these are deliberately sent to the caller, so they must never
+   * carry anything sensitive.
+   */
+  readonly headers?: Record<string, string>;
 
   constructor(
     code: ErrorCode,
@@ -67,6 +77,7 @@ export class AppError extends Error {
     options?: {
       details?: FieldError[];
       context?: Record<string, unknown>;
+      headers?: Record<string, string>;
       cause?: unknown;
     },
   ) {
@@ -76,6 +87,7 @@ export class AppError extends Error {
     this.status = ERROR_STATUS[code];
     this.details = options?.details;
     this.context = options?.context;
+    this.headers = options?.headers;
   }
 
   static is(err: unknown): err is AppError {

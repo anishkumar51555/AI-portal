@@ -294,11 +294,34 @@ Step 1 of publishing. Mints a short-lived, constrained upload URL.
 
 ```json
 {
-  "uploadUrl": "https://…r2.cloudflarestorage.com/staging/usr_abc/01JQ…zip?X-Amz-Signature=…",
-  "stagingKey": "staging/usr_abc/01JQ8Z3K7M9V2XW4N6P8R0T2Y5.zip",
-  "expiresAt": "2026-08-09T12:15:00.000Z",
-  "maxSizeBytes": 10485760
+  "data": {
+    "uploadUrl": "https://…r2.cloudflarestorage.com/",
+    "fields": {
+      "bucket": "ai-portal",
+      "key": "staging/usr_abc/01JQ8Z3K7M9V2XW4N6P8R0T2Y5.zip",
+      "Content-Type": "application/zip",
+      "Policy": "eyJleHBpcmF0aW9uIjoi…",
+      "X-Amz-Signature": "…"
+    },
+    "stagingKey": "staging/usr_abc/01JQ8Z3K7M9V2XW4N6P8R0T2Y5.zip",
+    "expiresAt": "2026-08-09T12:15:00.000Z",
+    "maxSizeBytes": 10485760
+  }
 }
+```
+
+**`fields` is not optional.** This is a presigned **POST**, not a PUT, so the client
+submits `multipart/form-data` with every entry of `fields` appended **before** the file
+part — S3 and MinIO ignore any field that follows the file. A presigned PUT would be a
+simpler shape, but it cannot carry a `content-length-range` condition: it can only pin one
+exact length, which the client itself reported. With POST the bucket rejects an oversized
+body on its own, which is the property that matters (docs/08 §4, threat 5).
+
+```ts
+const form = new FormData();
+for (const [name, value] of Object.entries(fields)) form.append(name, value);
+form.append("file", file); // last, always
+await fetch(uploadUrl, { method: "POST", body: form });
 ```
 
 Implementation requirements:
@@ -329,6 +352,11 @@ Step 2. The server now owns validation.
 Everything else — name, type, version, description, license — comes from the **manifest
 inside the archive**, never from the request body. One source of truth; the client cannot
 claim a type its manifest contradicts.
+
+`tags` are merged with the manifest's own `keywords` and de-duplicated, capped at 10. The
+manifest is what a consumer reads, so its keywords should always be findable in the
+catalog; `tags` exist so a publisher can add catalog-only terms without editing the file
+they just built.
 
 **Server pipeline** (detail in [04 §Flow 3](04-sequence-flows.md#flow-3--component-publishing)):
 
@@ -378,9 +406,24 @@ claim a type its manifest contradicts.
 }
 ```
 
-Idempotency: retrying with the same `stagingKey` after success returns
+Idempotency: retrying with the same archive after success returns
 `409 DUPLICATE_ARCHIVE` (the checksum is already published) rather than creating a second
 component. The staging object is deleted on both success and rejection.
+
+**The checksum check runs BEFORE the slug check**, and the order is load-bearing: a retry
+trips both conditions, and only `DUPLICATE_ARCHIVE` names the component it already went
+out as. `SLUG_TAKEN` would tell the publisher to rename something that is already theirs.
+
+**A failure after step 7 leaves an orphaned object, never a dangling row.** The promotion
+copy is committed to storage before the transaction opens, so a database failure loses the
+catalog row and strands a few KB in the bucket — the deliberate trade in
+[01 §5.2](01-architecture.md#52-two-phase-publish-stage--validate--promote). Verified by
+`tests/integration/publish-atomicity.test.ts`, which injects a failure at COMMIT.
+
+**The `UPLOAD_REJECTED` audit write is awaited, not fire-and-forget.** A serverless
+instance can freeze the moment it responds, so an un-awaited write may never land — and
+the rejection log is exactly what an abuse investigation needs. It is safe to await
+because the audit helper swallows its own errors and cannot turn a 422 into a 500.
 
 ---
 

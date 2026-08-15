@@ -162,6 +162,18 @@ const FIXTURES: Fixture[] = [
       ]),
   },
   {
+    name: "backslash-traversal.zip",
+    why: "FORGED — traversal using BACKSLASHES and no drive letter, so only path normalization catches it",
+    raw: () =>
+      rawZip([
+        { name: "component.json", data: MANIFEST_JSON },
+        // The gap between this and zip-slip.zip: an inspector that splits on
+        // "/" without first converting "\" sees one harmless filename here and
+        // lets it through. Windows extracts it as a real traversal.
+        { name: "..\\..\\evil.txt", data: "pwned" },
+      ]),
+  },
+  {
     name: "absolute-path.zip",
     why: "FORGED — entry targets an absolute filesystem path",
     raw: () =>

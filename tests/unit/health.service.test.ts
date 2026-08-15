@@ -31,7 +31,7 @@ beforeEach(() => {
   pingStorage.mockReset();
 });
 
-describe("[F0.3] deep health status mapping", () => {
+describe("deep health status mapping", () => {
   it("is ok when both dependencies are up", async () => {
     pingDatabase.mockResolvedValue(up);
     pingStorage.mockResolvedValue(up);
@@ -78,7 +78,7 @@ describe("[F0.3] deep health status mapping", () => {
   });
 });
 
-describe("[F0.2][F0.3] health route status codes", () => {
+describe("health route status codes", () => {
   it("returns 200 for a healthy deep check", async () => {
     pingDatabase.mockResolvedValue(up);
     pingStorage.mockResolvedValue(up);

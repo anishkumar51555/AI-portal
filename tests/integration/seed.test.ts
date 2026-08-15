@@ -124,6 +124,34 @@ describe("[F2.13] prisma/seed.ts is idempotent", () => {
     expect(second.versionRows).toEqual(first.versionRows);
   }, 180_000);
 
+  it("stores only manifests that satisfy the published spec", async (ctx) => {
+    if (!available) {
+      ctx.skip();
+      return;
+    }
+
+    const { manifestSchema } = await import("@/domain/schemas/manifest");
+    const { toFieldErrors } = await import("@/domain/errors");
+
+    const rows = await testDb.componentVersion.findMany({
+      select: { objectKey: true, manifest: true },
+    });
+    expect(rows.length).toBeGreaterThan(0);
+
+    // The catalog must never contain a manifest that violates the very
+    // specification this product exists to enforce. An earlier seed wrote
+    // `manifestVersion` instead of `specVersion` and skipped three required
+    // fields; nothing caught it, because nothing validated the seed's output.
+    const invalid = rows.flatMap((row) => {
+      const parsed = manifestSchema.safeParse(row.manifest);
+      return parsed.success
+        ? []
+        : [`${row.objectKey}: ${toFieldErrors(parsed.error)[0]?.message ?? "invalid"}`];
+    });
+
+    expect(invalid).toEqual([]);
+  }, 30_000);
+
   it("gives every seeded version a unique checksum and object key", async (ctx) => {
     if (!available) {
       ctx.skip();

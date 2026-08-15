@@ -15,10 +15,12 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ZipArchive } from "archiver";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/server/db";
 import { putObject } from "@/server/storage/storage.service";
 import { componentKey, templateKey } from "@/domain/storage-keys";
+import { validateManifest } from "@/server/services/manifest.validator";
 import { env } from "@/lib/env";
 
 const DIST_DIR = join(process.cwd(), "templates", ".dist");
@@ -256,18 +258,93 @@ const DEMO_COMPONENTS = [
  */
 const FIXED_DATE = new Date("2026-01-01T00:00:00.000Z");
 
+/**
+ * The type-specific manifest block, plus any extra files it declares.
+ *
+ * Each block carries the minimum its schema branch requires. Anything it names
+ * as a path has to be a real file in the archive too, or `checkAgainstArchive`
+ * rejects it — which is exactly the rule real publishers must satisfy.
+ */
+function demoBlock(component: (typeof DEMO_COMPONENTS)[number]) {
+  switch (component.type) {
+    case "SKILL":
+      return {
+        block: {
+          skill: {
+            instructions: "SKILL.md",
+            triggers: [`When the user asks to ${component.displayName.toLowerCase()}`],
+          },
+        },
+        files: { "SKILL.md": `# ${component.displayName}\n\n${component.summary}\n` },
+      };
+    case "PLUGIN":
+      return {
+        block: {
+          plugin: {
+            host: "claude-code",
+            commands: [
+              {
+                name: component.slug,
+                description: component.summary.slice(0, 200),
+                handler: "src/commands/run.ts",
+              },
+            ],
+          },
+        },
+        files: { "src/commands/run.ts": "export async function run() {}\n" },
+      };
+    case "AGENT":
+      return {
+        block: {
+          agent: {
+            // Inline prompt, not a path. `declaredPaths` treats a systemPrompt
+            // containing whitespace as inline — a single token would be read as
+            // a filename and demanded from the archive.
+            systemPrompt: `You are ${component.displayName}. ${component.summary}`,
+            model: { provider: "anthropic", preferred: "claude-opus-5" },
+            maxIterations: 10,
+          },
+        },
+        files: {},
+      };
+    case "MCP_GATEWAY":
+      return {
+        block: {
+          mcp: {
+            protocolVersion: "2026-01-01",
+            transport: "stdio",
+            command: { run: "node", args: ["dist/server.js"] },
+            auth: { type: "none" },
+            tools: [
+              {
+                name: "demo_tool",
+                description: component.summary.slice(0, 300),
+                inputSchema: { type: "object", properties: {} },
+              },
+            ],
+          },
+        },
+        files: {},
+      };
+  }
+}
+
 async function demoArchive(component: (typeof DEMO_COMPONENTS)[number], version: string) {
+  const { block, files } = demoBlock(component);
+
   const manifest = {
-    manifestVersion: "1.0",
+    specVersion: "1.0",
     name: component.slug,
+    displayName: component.displayName,
     version,
     type: component.type.toLowerCase().replace("_", "-"),
     description: component.summary,
     license: "MIT",
     author: { name: "Portal Demo" },
     keywords: [...component.tags],
-    runtime: { language: "typescript", node: ">=20" },
+    runtime: { language: "typescript" },
     entrypoint: "src/index.ts",
+    ...block,
   };
 
   const chunks: Buffer[] = [];
@@ -286,11 +363,36 @@ async function demoArchive(component: (typeof DEMO_COMPONENTS)[number], version:
     name: "src/index.ts",
     date: FIXED_DATE,
   });
+  for (const [name, body] of Object.entries(files)) {
+    archive.append(body, { name, date: FIXED_DATE });
+  }
 
   await archive.finalize();
   const bytes = Buffer.concat(chunks);
 
-  return { bytes, checksum: createHash("sha256").update(bytes).digest("hex"), manifest };
+  // Validate the demo manifest with the SAME validator that gates real uploads.
+  //
+  // This is not belt-and-braces. An earlier version of this seed wrote
+  // `manifestVersion` instead of `specVersion` and omitted three required
+  // fields, so every demo component in the catalog stored a manifest that
+  // violated the specification the product exists to enforce — and nothing
+  // caught it, because the seed never validated its own output.
+  const validated = validateManifest(JSON.stringify(manifest), {
+    archive: {
+      paths: ["component.json", "README.md", "src/index.ts", ...Object.keys(files)],
+    },
+  });
+
+  return {
+    bytes,
+    checksum: createHash("sha256").update(bytes).digest("hex"),
+    // Round-tripped through JSON because Prisma's `InputJsonValue` cannot
+    // express `Record<string, unknown>` (the manifest's optional
+    // `configSchema`), even though the value is plainly JSON. The parse is what
+    // makes the assertion true rather than a claim — this is exactly the
+    // "narrow unknown after a runtime step" case `as` is for (rules/10).
+    manifest: JSON.parse(JSON.stringify(validated)) as Prisma.InputJsonObject,
+  };
 }
 
 async function seedDemoCatalog(): Promise<number> {

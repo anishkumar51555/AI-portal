@@ -13,7 +13,12 @@ import { AppError } from "@/domain/errors";
  * Object-key derivation and the staging isolation boundary.
  *
  * Pure functions, so the security boundary is testable without a bucket.
- * Features: F3.11, F3.12
+ *
+ * Deliberately untagged. F3.11 and F3.12 are declared `integration` because they
+ * are claims about what the PRESIGN and PUBLISH endpoints do — proving
+ * `assertOwnStagingKey` works in isolation does not establish that anything
+ * calls it. F3.11 is covered by tests/integration/presign.test.ts; F3.12 waits
+ * for the publish endpoint. `npm run test:matrix` now enforces this.
  */
 
 function codeOf(fn: () => unknown): string {
@@ -26,7 +31,7 @@ function codeOf(fn: () => unknown): string {
   throw new Error("expected a throw, got none");
 }
 
-describe("[F3.11] keys are derived by the server, never supplied", () => {
+describe("keys are derived by the server, never supplied", () => {
   it("builds a staging key under the caller's own prefix", () => {
     const key = stagingKey("usr_abc123");
     expect(key).toMatch(/^staging\/usr_abc123\/[0-9A-HJKMNP-TV-Z]{26}\.zip$/);
@@ -97,7 +102,7 @@ describe("[F3.11] keys are derived by the server, never supplied", () => {
   });
 });
 
-describe("[F3.12] staging isolation boundary", () => {
+describe("staging isolation boundary", () => {
   const ALICE = "usr_alice";
   const own = stagingKey(ALICE);
 
