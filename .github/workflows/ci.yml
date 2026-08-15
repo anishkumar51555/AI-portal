@@ -34,13 +34,12 @@ jobs:
       # spec it is supposed to teach. Pure filesystem work — needs no services,
       # so it runs here rather than in the integration job.
       - run: npm run templates:verify
-      - run: npm run test:unit -- --coverage
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage
-          path: coverage/
-          retention-days: 7
+      # NO --coverage here. Most of src/server/ is covered by INTEGRATION tests
+      # (rules/70: repositories and app/api are "integration only"), so measuring
+      # a unit-only run against the global thresholds scores files the strategy
+      # never intended unit tests to reach. The coverage gate lives in the
+      # integration job, where the whole suite actually runs.
+      - run: npm run test:unit
 
   # ── real Postgres, real MinIO. Nothing is mocked at this layer. ──
   integration:
@@ -57,16 +56,7 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U portal"
           --health-interval 5s --health-timeout 5s --health-retries 10
-      minio:
-        image: bitnami/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-          MINIO_DEFAULT_BUCKETS: ai-portal-test
-        ports: ["9000:9000"]
-        options: >-
-          --health-cmd "mc ready local"
-          --health-interval 5s --health-timeout 5s --health-retries 20
+      # MinIO is NOT a service container — see the "Start MinIO" step below.
     env:
       DATABASE_URL: postgresql://portal:portal@localhost:5432/ai_portal_test
       DIRECT_DATABASE_URL: postgresql://portal:portal@localhost:5432/ai_portal_test
@@ -82,6 +72,47 @@ jobs:
       NEXT_PUBLIC_APP_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v4
+
+      # MinIO runs as a plain container, not a `services:` entry, for one
+      # reason: service containers cannot pass a COMMAND, and the official
+      # minio image does nothing without `server /data`.
+      #
+      # This used to be `bitnami/minio:latest`, which starts a server by
+      # default. Bitnami emptied that Docker Hub namespace in August 2025 —
+      # `bitnami/minio` now has zero tags and the pull fails with "manifest
+      # unknown". The surviving `bitnamilegacy/*` mirror is frozen and
+      # unmaintained, so we use the image docker-compose.yml already uses and
+      # accept the extra lines. CI and local now run the same MinIO.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+
+          # Poll the liveness endpoint rather than `sleep`: the container is
+          # usually ready in ~1s, and a fixed sleep is either slow or flaky.
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:9000/minio/health/live > /dev/null; then
+              echo "MinIO ready after ${i}s"; break
+            fi
+            if [ "$i" = "60" ]; then
+              echo "MinIO did not become ready"; docker logs minio; exit 1
+            fi
+            sleep 1
+          done
+
+          # bitnami/minio created this via MINIO_DEFAULT_BUCKETS; the official
+          # image has no equivalent, so create it explicitly.
+          #
+          # MC_HOST_<alias> configures the target from the environment. A
+          # separate `mc alias set` would be pointless here — each `--rm`
+          # container is a fresh filesystem, so the alias it writes is gone
+          # before the next command runs.
+          docker run --rm --network host \
+            -e MC_HOST_ci="http://minioadmin:minioadmin@localhost:9000" \
+            minio/mc:latest mb --ignore-existing ci/ai-portal-test
+
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -100,7 +131,23 @@ jobs:
             --shadow-database-url "$DATABASE_URL" \
             --exit-code
 
-      - run: npm run test:integration
+      # The coverage gate lives HERE, over the whole suite, because this is the
+      # only job with a real Postgres and MinIO. The thresholds in
+      # vitest.config.ts are unchanged — they simply now measure the population
+      # docs/11 §1 describes, instead of scoring integration-only code against a
+      # unit-only run and reporting 0%.
+      - run: npm run test -- --coverage
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+      - name: MinIO logs on failure
+        if: failure()
+        run: docker logs minio
 
   build:
     name: Build
