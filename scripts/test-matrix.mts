@@ -47,7 +47,9 @@ async function walk(dir: string): Promise<string[]> {
     if (e.isDirectory()) {
       if (e.name === "fixtures" || e.name === "node_modules") continue;
       out.push(...(await walk(full)));
-    } else if (/\.(test|spec)\.ts$/.test(e.name)) {
+      // `.tsx` too: component tests live there, and matching only `.ts`
+      // silently skipped the README-sanitization suite (F4.8).
+    } else if (/\.(test|spec)\.tsx?$/.test(e.name)) {
       out.push(full);
     }
   }

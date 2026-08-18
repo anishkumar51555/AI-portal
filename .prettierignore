@@ -9,3 +9,6 @@ prisma/migrations
 tests/fixtures
 templates/**/node_modules
 *.zip
+
+# Generated session state, not source.
+tests/e2e/.auth/

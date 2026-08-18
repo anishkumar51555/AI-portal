@@ -1,0 +1,7 @@
+# The catalog is meant to be indexed; the authed and API surfaces are not.
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /dashboard
+Disallow: /publish
+Disallow: /admin

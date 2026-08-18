@@ -31,6 +31,10 @@ next-env.d.ts
 /templates/**/dist/
 /templates/*.zip
 
+# E2E session state — a VALID signed session cookie. Committing it would put a
+# working credential in the repo, and it is regenerated on every run anyway.
+/tests/e2e/.auth/
+
 # env — .env.example is the only one that is committed
 .env
 .env.*

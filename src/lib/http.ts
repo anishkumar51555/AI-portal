@@ -31,6 +31,24 @@ export function jsonOk<T>(data: T, requestId: string, status = 200): NextRespons
   );
 }
 
+/**
+ * A LIST response: `{ data, pagination, ... }` (rules/30 response table).
+ *
+ * Separate from `jsonOk` rather than an optional argument on it, because a list
+ * without pagination is a different contract — one that silently truncates. If
+ * a handler reaches for this, it has to supply the page metadata.
+ */
+export function jsonPage<T, M extends Record<string, unknown>>(
+  data: T[],
+  meta: M,
+  requestId: string,
+): NextResponse {
+  return NextResponse.json(
+    { data, ...meta },
+    { status: 200, headers: { [REQUEST_ID_HEADER]: requestId } },
+  );
+}
+
 export function noContent(requestId: string): NextResponse {
   return new NextResponse(null, {
     status: 204,

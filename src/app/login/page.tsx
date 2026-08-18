@@ -3,13 +3,7 @@ import type { Metadata } from "next";
 import { getSessionUser } from "@/server/auth/guards";
 import { signInWithGitHub } from "@/server/auth/actions";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 
 export const metadata: Metadata = {
   title: "Sign in",
@@ -48,7 +42,10 @@ export default async function LoginPage({
     <main className="flex min-h-screen items-center justify-center px-6 py-16">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle className="text-2xl">Sign in</CardTitle>
+          {/* A real <h1>, not CardTitle: CardTitle renders a <div>, which would
+              leave this page with no heading at all — a screen reader user
+              lands with nothing to orient on (rules/60). */}
+          <h1 className="text-2xl leading-none font-semibold">Sign in</h1>
           <CardDescription>
             Sign in with GitHub to download templates, publish components, and manage what
             you have shared.

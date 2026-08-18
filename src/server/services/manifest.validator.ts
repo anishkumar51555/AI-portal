@@ -1,4 +1,4 @@
-import { AppError, validationError, type FieldError } from "@/domain/errors";
+import { AppError, toFieldErrors, type FieldError } from "@/domain/errors";
 import { manifestSchema, type ComponentManifest } from "@/domain/schemas/manifest";
 import {
   checkAgainstArchive,
@@ -142,7 +142,12 @@ function parseSchema(json: unknown): ComponentManifest {
     );
   }
 
-  throw validationError(result.error, "MANIFEST_INVALID");
+  // Same phrasing as the cross-check path below. Without this, a schema failure
+  // fell back to the generic default message while a secret-scan failure said
+  // "component.json has 3 problems." — two different voices for the same class
+  // of error, from the publisher's point of view.
+  const details = toFieldErrors(result.error);
+  throw new AppError("MANIFEST_INVALID", messageFor(details), { details });
 }
 
 function messageFor(problems: FieldError[]): string {

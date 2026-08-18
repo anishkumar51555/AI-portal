@@ -1,8 +1,10 @@
 import { AppError } from "@/domain/errors";
+import { catalogQuerySchema, toCriteria } from "@/domain/schemas/catalog";
 import { publishBodySchema } from "@/domain/schemas/publish";
-import { requireAuth } from "@/server/auth/guards";
+import { getSessionUser, requireAuth } from "@/server/auth/guards";
+import { search } from "@/server/services/component.service";
 import { publishComponent } from "@/server/services/publish.service";
-import { jsonOk, withRoute } from "@/lib/http";
+import { jsonOk, jsonPage, withRoute } from "@/lib/http";
 
 /**
  * POST /api/components 🔒 — publish a new component.
@@ -16,6 +18,41 @@ import { jsonOk, withRoute } from "@/lib/http";
  */
 
 export const dynamic = "force-dynamic";
+
+/**
+ * GET /api/components — catalog search.
+ *
+ * Public. The query schema coerces and clamps rather than throwing, so a stale
+ * bookmark or a crawler hitting `?page=abc` gets page 1 instead of a 400
+ * (rules/30).
+ *
+ * Spec: docs/03-api-contract.md §3.4
+ * Features: F4.1–F4.5
+ */
+export const GET = withRoute(async (req, { requestId }) => {
+  const params = new URL(req.url).searchParams;
+
+  const query = catalogQuerySchema.parse({
+    q: params.get("q") ?? undefined,
+    // Repeatable: ?type=skill&type=agent
+    type: params.getAll("type").length > 0 ? params.getAll("type") : undefined,
+    tags: params.get("tags") ?? undefined,
+    sort: params.get("sort") ?? undefined,
+    page: params.get("page") ?? undefined,
+    pageSize: params.get("pageSize") ?? undefined,
+  });
+
+  // Only an ADMIN sees SUSPENDED components. `getSessionUser` rather than
+  // `requireAuth` — the catalog is public, the elevated view is not.
+  const user = await getSessionUser();
+  const page = await search(toCriteria(query, user?.role === "ADMIN"));
+
+  return jsonPage(
+    page.data,
+    { pagination: page.pagination, facets: page.facets },
+    requestId,
+  );
+});
 
 export const POST = withRoute(async (req, { requestId }) => {
   const user = await requireAuth();

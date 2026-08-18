@@ -1,0 +1,30 @@
+# Everything the build does not need. Keeps the context small and stops local
+# secrets or build output leaking into an image layer.
+node_modules
+.next
+.git
+.github
+coverage
+playwright-report
+test-results
+.playwright
+
+# NEVER copy real secrets into the build context.
+.env
+.env.*
+!.env.example
+
+# Not needed at build or runtime.
+tests
+# scripts/ imports from tests/, and `next build` typechecks it — excluding one
+# without the other breaks the build with a missing-module error.
+scripts
+docs
+templates/.dist
+*.md
+!README.md
+.vscode
+.idea
+Dockerfile
+.dockerignore
+docker-compose.yml

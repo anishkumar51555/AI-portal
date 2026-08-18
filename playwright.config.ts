@@ -1,4 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
+import { config as loadEnv } from "dotenv";
+import { STORAGE_STATE } from "./tests/e2e/global-setup";
+
+// The global setup forges a session cookie, which needs AUTH_SECRET, and the
+// dev server needs the rest. Playwright does not read .env.local on its own.
+// `dotenv` is already a dependency (prisma.config.ts uses it) — no new package.
+loadEnv({ path: [".env.local", ".env"], quiet: true });
 
 /**
  * Two journeys only — see docs/11-testing-strategy.md §4.
@@ -26,7 +33,23 @@ export default defineConfig({
     video: "retain-on-failure",
   },
 
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // Mints the session cookie once, before any test runs.
+  globalSetup: "./tests/e2e/global-setup.ts",
+
+  projects: [
+    // Anonymous journeys: redirects, the public catalog.
+    {
+      name: "anonymous",
+      use: { ...devices["Desktop Chrome"] },
+      testIgnore: /authed\./,
+    },
+    // Signed-in journeys, using the forged-but-real session cookie.
+    {
+      name: "authed",
+      use: { ...devices["Desktop Chrome"], storageState: STORAGE_STATE },
+      testMatch: /authed\./,
+    },
+  ],
 
   // Reuse an already-running dev server locally; start one in CI.
   webServer: process.env.E2E_BASE_URL

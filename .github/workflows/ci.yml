@@ -145,6 +145,22 @@ jobs:
           path: coverage/
           retention-days: 7
 
+      # E2E runs in THIS job because it is the only one with Postgres and MinIO.
+      # The session cookie is forged with the real secret against a real user
+      # row, so every guard runs as in production — only GitHub's OAuth screen
+      # is skipped (docs/11 §4).
+      - run: npx playwright install --with-deps chromium
+      - run: npm run templates:build
+      - run: npm run db:seed
+      - run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
       - name: MinIO logs on failure
         if: failure()
         run: docker logs minio
@@ -188,9 +204,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
-      # Add a --gate line per phase as it completes. Advisory until then:
-      # a gate on unbuilt phases would block every PR from day one.
+      # One --gate line per COMPLETED phase. A gate on an unbuilt phase would
+      # block every PR from day one, so they are added as each phase lands.
+      # P5 is deliberately absent: its features are deploy-time and manual.
       - run: npm run test:matrix -- --gate P0
+      - run: npm run test:matrix -- --gate P1
+      - run: npm run test:matrix -- --gate P2
+      - run: npm run test:matrix -- --gate P3
+      - run: npm run test:matrix -- --gate P4
       - name: Full matrix (informational)
         run: npm run test:matrix
         continue-on-error: true
@@ -213,3 +234,26 @@ jobs:
         with:
           languages: javascript-typescript
       - uses: github/codeql-action/analyze@v3
+
+      # Scans the IMAGE, not the repo: CodeQL and `npm audit` see application
+      # code and npm dependencies, neither of which covers the Alpine base
+      # layer's OS packages. That is where a surprising share of CVEs live.
+      - name: Build image for scanning
+        run: docker build -t ai-portal:scan .
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ai-portal:scan
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          # Report rather than block: a base-image CVE with no fix available
+          # would otherwise wedge every merge until upstream ships a patch.
+          exit-code: "0"
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy.sarif

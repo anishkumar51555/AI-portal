@@ -21,7 +21,7 @@ export default defineConfig({
   resolve: { alias },
   test: {
     ...shared,
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.{ts,tsx}"],
 
     /**
      * Unit and integration tests differ in one crucial way: integration tests
@@ -37,14 +37,14 @@ export default defineConfig({
     projects: [
       {
         resolve: { alias },
-        test: { ...shared, name: "unit", include: ["tests/unit/**/*.test.ts"] },
+        test: { ...shared, name: "unit", include: ["tests/unit/**/*.test.{ts,tsx}"] },
       },
       {
         resolve: { alias },
         test: {
           ...shared,
           name: "integration",
-          include: ["tests/integration/**/*.test.ts"],
+          include: ["tests/integration/**/*.test.{ts,tsx}"],
           fileParallelism: false,
         },
       },
