@@ -15,10 +15,16 @@ test-results
 !.env.example
 
 # Not needed at build or runtime.
+#
+# `next build` TYPECHECKS everything the context contains, so anything excluded
+# must have nothing left behind that imports it. This has bitten twice:
+# scripts/ imports tests/, and playwright.config.ts imports tests/e2e. Excluding
+# one without the other fails the image build with a missing-module error that
+# never appears locally, because locally the files are all present.
 tests
-# scripts/ imports from tests/, and `next build` typechecks it — excluding one
-# without the other breaks the build with a missing-module error.
 scripts
+playwright.config.ts
+vitest.config.ts
 docs
 templates/.dist
 *.md
