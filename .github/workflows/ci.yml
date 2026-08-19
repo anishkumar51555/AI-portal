@@ -240,10 +240,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm audit --audit-level=high
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
 
       # Scans the IMAGE, not the repo: CodeQL and `npm audit` see application
       # code and npm dependencies, neither of which covers the Alpine base
@@ -253,6 +253,14 @@ jobs:
 
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@v0.36.0
+        # The scan is INFORMATIONAL. Trivy pulls its vulnerability database from
+        # ghcr.io on every run, and that pull is rate-limited — so the scanner
+        # being unavailable must not fail a build that has nothing wrong with it.
+        continue-on-error: true
+        env:
+          # Authenticates the DB pull, which is what the rate limit applies to.
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         with:
           image-ref: ai-portal:scan
           format: sarif
@@ -262,8 +270,11 @@ jobs:
           # would otherwise wedge every merge until upstream ships a patch.
           exit-code: "0"
 
+      # Only when the scan actually produced a file. `if: always()` alone made
+      # a failed scan fail the JOB at the upload step instead — "Path does not
+      # exist: trivy.sarif", which says nothing about the real cause.
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: hashFiles('trivy.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
