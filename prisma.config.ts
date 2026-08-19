@@ -26,6 +26,13 @@ export default defineConfig({
     // production DATABASE_URL is Neon's pooled host and DIRECT_DATABASE_URL is not.
     // docs/05 section 3.1
     url: process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
+
+    // Needed by `prisma migrate diff --from-migrations`, which replays every
+    // migration into a scratch database to compare against schema.prisma. That
+    // database is RESET each time, so it must never point at a real one.
+    //
+    // Prisma 7 removed the `--shadow-database-url` CLI flag; it lives here now.
+    shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL,
   },
 
   migrations: {
