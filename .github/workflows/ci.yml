@@ -123,13 +123,23 @@ jobs:
 
       # Catches schema.prisma edited without generating a migration — the single
       # most common way a solo developer ships a build that crashes on boot.
-      - name: Migrations match schema
+      #
+      # Prisma 7 changed this command twice over: `--to-schema-datamodel` became
+      # `--to-schema`, and `--shadow-database-url` was REMOVED in favour of
+      # `datasource.shadowDatabaseUrl` in prisma.config.ts. The old invocation
+      # exited 1 (error), which reads exactly like "drift found" — it is not.
+      #
+      # The shadow database is RESET on every run, so it gets its own database
+      # rather than sharing the one holding the test data.
+      - name: Create shadow database
         run: |
-          npx prisma migrate diff \
-            --from-migrations prisma/migrations \
-            --to-schema-datamodel prisma/schema.prisma \
-            --shadow-database-url "$DATABASE_URL" \
-            --exit-code
+          PGPASSWORD=portal psql -h localhost -U portal -d postgres             -c "CREATE DATABASE ai_portal_shadow;"
+
+      - name: Migrations match schema
+        env:
+          SHADOW_DATABASE_URL: postgresql://portal:portal@localhost:5432/ai_portal_shadow
+        run: |
+          npx prisma migrate diff             --from-migrations prisma/migrations             --to-schema prisma/schema.prisma             --exit-code
 
       # The coverage gate lives HERE, over the whole suite, because this is the
       # only job with a real Postgres and MinIO. The thresholds in
@@ -230,10 +240,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm audit --audit-level=high
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
 
       # Scans the IMAGE, not the repo: CodeQL and `npm audit` see application
       # code and npm dependencies, neither of which covers the Alpine base
@@ -242,7 +252,15 @@ jobs:
         run: docker build -t ai-portal:scan .
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
+        # The scan is INFORMATIONAL. Trivy pulls its vulnerability database from
+        # ghcr.io on every run, and that pull is rate-limited — so the scanner
+        # being unavailable must not fail a build that has nothing wrong with it.
+        continue-on-error: true
+        env:
+          # Authenticates the DB pull, which is what the rate limit applies to.
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         with:
           image-ref: ai-portal:scan
           format: sarif
@@ -252,8 +270,11 @@ jobs:
           # would otherwise wedge every merge until upstream ships a patch.
           exit-code: "0"
 
+      # Only when the scan actually produced a file. `if: always()` alone made
+      # a failed scan fail the JOB at the upload step instead — "Path does not
+      # exist: trivy.sarif", which says nothing about the real cause.
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: hashFiles('trivy.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif

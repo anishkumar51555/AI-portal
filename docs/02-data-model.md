@@ -482,6 +482,28 @@ the value, which is what suppresses the `DROP DEFAULT`.
 npx prisma migrate dev --name check --create-only   # must produce "This is an empty migration."
 ```
 
+### 4.2 The drift check changed in Prisma 7
+
+CI runs the same check non-interactively. **Two flags moved**, and the old form fails in a
+way that reads exactly like real drift:
+
+```bash
+# Prisma ≤6 — now exits 1 with a usage dump, which looks like "drift found"
+npx prisma migrate diff --from-migrations prisma/migrations   --to-schema-datamodel prisma/schema.prisma   --shadow-database-url "$DATABASE_URL" --exit-code
+
+# Prisma 7
+npx prisma migrate diff --from-migrations prisma/migrations   --to-schema prisma/schema.prisma --exit-code
+```
+
+`--shadow-database-url` was **removed**; the shadow database now comes from
+`datasource.shadowDatabaseUrl` in `prisma.config.ts`, read from `SHADOW_DATABASE_URL`.
+
+That database is **reset on every run**, so it must be its own — pointing it at the test
+database would wipe the test data mid-suite.
+
+Exit codes with `--exit-code`: **0** empty, **1** error, **2** diff found. A 1 is a broken
+command, not a schema problem.
+
 Query it from the repository layer with a typed raw query:
 
 ```ts

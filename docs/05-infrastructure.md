@@ -149,6 +149,32 @@ R2 needs the equivalent rule in the dashboard, with your production origin.
 > client (`http://localhost:9000/ai-portal/key`). R2 and S3 use virtual-host style. Drive
 > it from an env var: `S3_FORCE_PATH_STYLE=true` locally, `false` in production.
 
+### 2.2b Why `package.json` pins `deepmerge-ts` with an override
+
+```jsonc
+"overrides": { "deepmerge-ts": "^8.0.1" }
+```
+
+`npm audit` reports 3 high-severity findings for `deepmerge-ts` <8 (stack exhaustion on
+recursive object graphs, GHSA-ggr8-5vv4-36mx). It reaches us through
+`prisma → @prisma/config → deepmerge-ts@7.1.5`, which is pinned exactly, and
+`prisma@7.9.1` is the newest release — there is no upstream fix yet.
+
+**Do not run `npm audit fix --force`.** It "fixes" this by installing `prisma@6.12.0`,
+which is a different major: Prisma 6 does not support `prisma.config.ts` or the driver
+adapter this project is built on. The suggested remedy breaks the application.
+
+The override forces the patched `deepmerge-ts@8.0.1` instead. Verified after applying it:
+`prisma validate`, `generate`, `migrate deploy`, `migrate diff` and `db:seed` all work,
+490 tests pass, and `npm audit --audit-level=high` reports zero.
+
+Worth knowing for context: `prisma` is a **devDependency** — the CLI. The runtime package
+is `@prisma/client`, which does not depend on `deepmerge-ts` at all, so this never reached
+production either way. The override is about keeping the CI audit honest rather than
+suppressing it.
+
+**Remove the override once Prisma ships a release depending on `deepmerge-ts` ^8.**
+
 ### 2.3 Environment variables
 
 `.env.example` is committed. `.env.local` is not, ever.
