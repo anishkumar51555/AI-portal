@@ -16,9 +16,19 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  // Required by the production Dockerfile (docs/05-infrastructure.md section 5):
-  // Next traces exactly the node_modules it needs, so the runner stage stays small.
-  output: "standalone",
+  // Required by the production DOCKERFILE (docs/05 §5): Next traces exactly the
+  // node_modules it needs, so the runner stage stays small.
+  //
+  // Disabled on Vercel, which does its own tracing and bundling. With
+  // standalone on, Next writes the trace into .next/standalone and Vercel's
+  // onBuildComplete then dies looking for a file that was never emitted:
+  //
+  //   ENOENT: no such file or directory, open '.next/next-server.js.nft.json'
+  //
+  // The build otherwise succeeds completely — compile, typecheck, page data and
+  // static generation all pass — so the failure looks like a platform bug
+  // rather than a config conflict.
+  output: process.env.VERCEL ? undefined : "standalone",
 
   reactStrictMode: true,
 
